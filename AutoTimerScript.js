@@ -3,7 +3,7 @@ fetch('https://antimatter15.com/ocrad.js/ocrad.js')
     .then(resp => ocrad_resp = resp.text())
     .then(val => {ocrad_js = val; console.log('OCRAD.js has completed download')} )
 // Note that I cannot eval in a promise as it vanishes into a different context 
-
+eval(ocrad_js)
 
 
 // new Blob([ocrad_js], {type: 'application/javascript'})
@@ -53,7 +53,7 @@ canvas.width = videoFrame.videoWidth
 let canvasctx = canvas.getContext('2d', {alpha: false})
 canvasctx.fillStyle = "red"
 canvasctx.strokeStyle = "red"
-// document.querySelectorAll('#player-theater-container')[0].after(canvas) // debug youtube
+document.querySelectorAll('#player-theater-container')[0].after(canvas) // debug youtube
 
 const phaseName = {
     game: "GAME",
@@ -74,7 +74,7 @@ let streamState = {
     timer: {            // last known timer screenshot 
         countup: false, //
         ts: null,       // when time was determined
-        time: null      // time in seconds
+        time: null,     // time in seconds
     },
     teams: []           // Team names
 }
@@ -182,7 +182,7 @@ function scr() { // grab frame & save to canvas buffer, takes about 20-35ms on m
     streamState.frameBuf.unshift({
         ts: Date.now(),
         phase: null, //determined phase
-        data: null // any data revelant to that phase
+        data: {} // any data revelant to that phase
     })
     while(streamState.frameBuf.length > 30) { //clean buffer, per .5s = 15s
         streamState.frameBuf.pop()
@@ -319,14 +319,25 @@ function debugverifyAllPhases() { // Debug verify all phases with on screen stuf
 
 async function resolvePhase (foundState) {
     // Ok lets start grabbing info and testing
+    
     if (foundState == streamPhase.game) {
         streamState.frameBuf[0].phase = streamPhase.game.name
         // if new state
-        setGamePhaseData()
-        // set accum, do timer sync every 10s & team sync 15s
-        // timer sync must drift by 2 to cause a resync
+        let p = performance.now()
+        let promisesOCR = [promiseTeamNames(streamPhase.game)]
+        promisesOCR[2] = promiseText(streamPhase.game.grab.timer, true, 560, 3)
+        
+        // resolving both team names & timer at same time, but I'll move timer out of this soon
+        Promise.all(promisesOCR).then( (arr) => {
+            p = performance.now() - p
+            setTimerObj(arr[3])
+            stateDiv.innerHTML = `${streamState.teams[0]} vs. ${streamState.teams[1]}  ${arr[0].trim()} in ${p}ms`
+        })
+
+        // setGamePhaseData()
+        // set accum, do timer sync every 20s & team sync 30s
     } else if (foundState == streamPhase.wait) {
-        // sync timer & team names
+        // ON NEW: sync timer & team names
         streamState.frameBuf[0].phase = streamPhase.wait.name
         let p = performance.now()
         let promisesOCR = []
@@ -335,7 +346,7 @@ async function resolvePhase (foundState) {
         // let timer_str = lintTimerString(recognizeText(streamPhase.wait.grab.timer, true, 175, 1)) //takes 280ms. thats wait too much
         
         let timer_str = ""
-        promisesOCR[2] = new Promise(resolve => {
+        promisesOCR[2] = new Promise(resolve => { // timer takes 100ms with scaling damn
             OCRAD(binarization(scaImg(canvasctx.getImageData(...streamPhase.wait.grab.timer), 0.3), 
                     560), {numeric:true}, resolve)
         }).then( str => timer_str = str.trim())
@@ -352,7 +363,7 @@ async function resolvePhase (foundState) {
             stateDiv.innerHTML = `${streamState.teams[0]} vs. ${streamState.teams[1]}  ${timer_str} in ${p}ms`
         })
         
-        console.log(`finished all task for WAIT ${performance.now() - p}ms`)
+        // console.log(`finished all task for WAIT ${performance.now() - p}ms`)
     } else if (foundState == streamPhase.pause_game) {
         streamState.frameBuf[0].phase = streamPhase.pause.name
         // freeze timer until phase changes
@@ -389,13 +400,138 @@ async function promiseTeamNames(phase, force=false) {
 
     for (let i=0; i<2; i++) {
         if (!streamState.teams[i] || force) {
+            console.log('Getting team names')
             prom = promiseText(teamRef[i])
-            prom.then(str => teamSave[i] = str.trim())
+            prom.then(str => teamSave[i] = str.trim()) // save directly to state
             if (!teamSave[i])    teamSave[i] = prom // only save promise to complete null check
-            teamPromises.push(prom)
+            teamPromises[i] = prom
         }
     }
     return teamPromises
+}
+
+let minTimeDrift = 70 // 70ms
+// 125ms is only noticeable side-by-side, at 62 you can't tell at all
+
+async function startSyncTimer(phase, retry=0)
+
+async function syncTimer(phase, retry=0, countup=false, options={}) {
+    let lastSyncTime = null     // Find last sync time
+    for (let f of streamState.frameBuf) {
+        if (f['data']['timer']) { // if this has been synced; will only be set
+            lastSyncTime = f['data']['timer']
+            break
+        }
+    }
+
+    if (retry>2) {
+        console.log(`Too many retries`)
+        return
+    }
+    
+    // if lintTimerString fails or if the timer jitters >2s,
+    // we need to drop the whole sync and restart
+
+    // I'm gonna treat this as a recursive function start, bailing out when I fail
+    syncPrecision = 1000
+    console.log(`Syncing for 1000ms on retry ${retry}`)
+    let newestFrame = streamState.frameBuf[0]
+    // set timer state so it doesnt recast loop?
+
+    promiseText(phase.grab.timer, true, 560, 3).then( timer_str => {
+        // top-level 1000ms start. no sync check or time check
+        if (!lintTimerString(timer_str)) {
+            console.log("Failed to sync (no timer), retrying")
+            syncTimer(phase, retry++) // clear timer? cause we're not on the frametime anymore.
+            // should timeout this with nearest frametime
+        }
+        newestFrame['data']['timer'] = {
+            time: lintTimerString(timer_str), // this should be total seconds not string
+            sync: syncPrecision,
+            countup: countup
+        }
+        console.log(`synced at ${syncPrecision}ms`)
+        let timeElasped = 500 - (Date.now() - streamState.frameBuf[0].ts) 
+
+        // now this is the recurse down
+        // damn this needs to be its own function I think, so it can call itself
+        setTimeout( 
+    })
+}
+
+let timerMaxPrecision = 63
+async function recurseDown(syncPrecision, phase, retry) {
+
+    if (syncPrecision <= timerMaxPrecision) return
+
+    let lastSyncTime = null
+    for (let f of streamState.frameBuf) {
+        if (f['data']['timer']) {
+            lastSyncTime = f['data']['timer']
+            break
+        }
+    }
+
+    // now confirm that sync is in order & valid
+    if (!lastSyncTime) {
+        console.log("Failed to sync timer, couldn't find the last sync")
+        syncTimer(phase, retry++)
+    } else {
+        console.log(`Syncing for ${syncPrecision}ms`)
+        if (syncPrecision < 500) scr() // Take screenshot if less than
+        // Need to do Promise to get new sync time
+        // Might need a special promise to work on selected frames? cause I'm basically
+        // saving to the wrong frame here if I'm not careful
+        promiseText(phase.grab.timer, true, 560, 3).then( timer_str => {
+            let nowDate = Date.now()
+            if (nowDate - streamState.frameBuf[0].ts > 70) {
+                console.log("You took too long. Now your candy's gone.")
+                syncTimer(retry++)
+            }
+            let timerdir = lastSyncTime.countup ? 1 : -1
+            if (dateNow - lastSyncTime.time) // ah this is so confusing omg why is this async
+            // why is it always async
+        })
+        // then I can ensure time is in sync, and has the proper number
+    }
+
+}
+
+}
+    if (!lastSyncTime) { // this gets run after scr so we dont need a new one
+        let newFrame = streamState.frameBuf[0]
+        console.log("syncing for 1000ms")
+        // AAAAAAHH I need to do the special timer stuff- pretend its game only right now
+        promiseText(phase.grab.timer, true, 560, 3).then( timer_str => {
+            newFrame['data']['timer'] = {
+                time: lintTimerString(timer_str),
+                sync: 1000
+            }
+            console.log("synced at 1000ms")
+            // timeout func for wait for the next frame
+        })
+    } else {        // now lets start to sync down
+        let newSync = lastSyncTime['sync'] / 2
+        
+        // do timeout on the next captured frame without taking a screenshot
+        setTimeout( (syncPrecision) => {
+            if (newSync < 500) scr() // take closer screenshot
+
+            promiseText(phase.grab.timer, true, 560, 3).then( (timer_str) => {
+                let nowDate = Date.now()
+                if (nowDate - streamState.frameBuf[0].ts > 70) 
+                    nowDate = null // break sync, but for now pass
+                    
+                // ensure that last known timer is synced with this
+                streamState.frameBuf[0]['data']['timer'] = {
+                    time: lintTimerString(timer_str),
+                    sync: syncPrecision
+                }
+
+                // if timer_str > new store, 1-sync/2 or 
+            })
+        } ,550, newSync);
+    }
 }
 
 function recognizeText(rect, numeric=false, thres=560, scale=1, tesseract=false) {
@@ -436,11 +572,12 @@ function getLastKnownState() {
         if (streamState.frameBuf[f].phase) {
                 return [frame.phase, f]
         } else {
-            if (!(numIgnored++ > stateIgnore))
+            if (!(numIgnored++ > stateIgnore)) //skip N frames until unknown is returned
                 continue
+            return [null, f]
         }
     }
-    return [null, -1] // null is unknown
+    return [null, -1] // only occurs with buffer.length < stateIgnore
 }
 
 /*
@@ -472,8 +609,8 @@ function setTimerObj(timer_str) {
         streamState.timer.time = parseInt(timer_str.substring(0,2))*60 + 
                                             timer_str.substring(2,4)
         streamState.timer.ts = streamState.frameBuf[0].ts
-        //TODO: Start to do the timer stagger to check state
     }
+    return (timer_str!=null)
 }
 
 async function setGamePhaseData () {
