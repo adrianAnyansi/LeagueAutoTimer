@@ -1,34 +1,21 @@
-let ocrad_js, tesseract_js, ocrad_resp, tesseract_resp = null;
-fetch('https://antimatter15.com/ocrad.js/ocrad.js')
+let ocrad_js, ocrad_resp = null;
+let ocradPromise = fetch('https://antimatter15.com/ocrad.js/ocrad.js')
     .then(resp => ocrad_resp = resp.text())
-    .then(val => {ocrad_js = val; console.log('OCRAD.js has completed download')} )
-// Note that I cannot eval in a promise as it vanishes into a different context 
+    .then(val => {ocrad_js = val; console.log('OCRAD.js has completed download'); 
+    } )
+// TODO: try and make a worker to reuse
+await ocradPromise
 eval(ocrad_js)
-
-
+// NOTE: If I eval in callback, it vanishes into a different context 
+// console.log(`OCRAD has evaled ${OCRAD}`)
 // new Blob([ocrad_js], {type: 'application/javascript'})
 // new Worker(URL.createObjectURL(blob))
 // new Worker('data:application/javascript,' +encodeURIComponent(ocrad_js))
 
-// fetch('https://unpkg.com/tesseract.js@v2.1.3/dist/tesseract.min.js')
-//     .then(resp => tesseract_resp = resp.text())
-//     .then(val => {tesseract_js = val; eval(tesseract_js); })
-
-// can change whitelist based on the query, or have 2 workers
-/*
-let t_worker = new Tesseract.createWorker({
-    // logger: m => console.log(m),
-});
-await t_worker.load();
-await t_worker.loadLanguage('eng');
-await t_worker.initialize('eng');
-await t_worker.setParameters({
-tessedit_char_whitelist: '0123456789:',
-});
-*/
+// TODO: Use Math.trunc instead of parseInt
 
 //Util methods
-function toxFF(num) { //imagine left-padding
+function toxFF(num) { //TODO: Use leftpad, call it RGBtoHex
     return num < 16 ? '0'+num.toString('16') : num.toString('16')
 }
 function toxFFFFFF(num) {
@@ -40,11 +27,9 @@ function hexToRGB(hex) {
 function sqrDist3D(p1, p2) {
     return Math.sqrt( (p1[0]-p2[0])**2 + (p1[1]-p2[1])**2 + (p1[2]-p2[2])**2 )
 }
-function tesseract_rect(rect) { // There are now 16 competing standards
-    return {rectangle: {left: rect[0], top: rect[1], width: rect[2], height: rect[3]}}
-}
 
 let videoElms = document.querySelectorAll('video') // Should only be 1 video
+// TODO: Check if this is being run on Youtube/Twitch or not
 if (videoElms.length > 1) console.log('Found more than 1 video frame??') 
 let videoFrame = document.querySelectorAll('video')[0]
 let canvas = document.createElement('canvas')
@@ -53,7 +38,79 @@ canvas.width = videoFrame.videoWidth
 let canvasctx = canvas.getContext('2d', {alpha: false})
 canvasctx.fillStyle = "red"
 canvasctx.strokeStyle = "red"
+canvasctx.style.width = "100%"
 document.querySelectorAll('#player-theater-container')[0].after(canvas) // debug youtube
+
+// quality actually affects the pixel density, thus % based units
+// TODO: MVP If quality changes, everything needs to be recalced, and OCR scaling needs to be changed
+function genSquare(x, x2, y, y2) {
+    return [Math.round(x*videoFrame.videoWidth), Math.round(y*videoFrame.videoHeight), 
+            Math.round((x2-x)*videoFrame.videoWidth), Math.round((y2-y)*videoFrame.videoHeight)]
+}
+function genLine(c1, c2, p1, xaxis=true) {
+    // width/height gets set to 1 automatically
+    let [cx, cy] = xaxis ? [[c1, (c2-c1)], [p1, 1/videoFrame.videoHeight]] : [[p1, 1/videoFrame.videoWidth], [c1, (c2-c1)]]
+    return [Math.round(cx[0]*videoFrame.videoWidth), Math.round(cy[0]*videoFrame.videoHeight), 
+            Math.round(cx[1]*videoFrame.videoWidth), Math.round(cy[1]*videoFrame.videoHeight)]
+}
+// NOTE: Using OCRAD very quickly seems to cause a memory leak, maybe caused by the hitches
+// using sync OCRAD causes spikes, I can't track it that well 
+function recognizeText(rect, numeric=false, thres=560, scale=1) { // sync OCR
+    let imageData = canvasctx.getImageData(...rect)
+    // binarization and scaling with image data
+    imageData = scale > 1 ? scaImg(binarization(imageData, thres), scale) : 
+                            binarization(scaImg(imageData, scale), thres)
+    let str = (numeric) ? OCRAD(imageData, {numeric: true}).trim() : OCRAD(imageData).trim()
+    return str
+}
+
+function promiseText(rect, numeric=false, thres=560, scale=1) { // async OCR
+    let imageData = canvasctx.getImageData(...rect) //testing shows <4ms
+    imageData = scale > 1 ? scaImg(binarization(imageData, thres), scale) : 
+                            binarization(scaImg(imageData, scale), thres)
+    return new Promise( (resolve) => {
+        if (numeric) 
+            OCRAD(imageData, {numeric: true}, resolve) // TODO: Just pass boolean?
+        else {
+            OCRAD(imageData, resolve)
+        }
+    })
+    imageData = null //I'm leaking memory somehow, dunno how
+}
+
+// Binarization to improve the OCR with a b/w image, max threshold = 765, 3D dist of 255
+// most UI is white on dark colours, so thats why invert true.
+function binarization(imagedata, threshold=175, invert=true) {
+    let bw = invert ? [0, 0xFF] : [0xFF, 0]
+    let binImage = new ImageData(imagedata.width, imagedata.height)
+    for (let i=0; i < imagedata.data.length; i += 4) {
+        px_sum = imagedata.data[i] + imagedata.data[i+1] + imagedata.data[i+2]
+        bin = (px_sum > threshold) ? bw[0] : bw[1]
+        binImage.data[i] = binImage.data[i+1] = binImage.data[i+2] = bin
+        binImage.data[i+3] = 255
+    }
+    return binImage
+}
+
+// thanks to LinusU cause I was doing src -> dist
+// TODO: MVP Need to reimplement pixelheight at different resolutions, and test OCR at those resolutions
+// Also probably move the scaling/thresholds out of hardcoded values
+function scaImg(srcImg, scale=1, pixelheight=0) {
+    if (scale == 1) return srcImg // Dont do this thanks
+    let scaImg = new ImageData(srcImg.width*scale, srcImg.height*scale)
+    for (let y=0; y < scaImg.height; y++) {
+        for (let x=0; x < scaImg.width; x++) {
+            let srcX = Math.round(x * srcImg.width / scaImg.width)
+            let srcY = Math.round(y * srcImg.height / scaImg.height)
+            let srcIdx = (srcX + srcY * srcImg.width) * 4
+
+            for (let rgb=0; rgb<3; rgb++)
+                scaImg.data[(x + y * scaImg.width)*4+rgb] = srcImg.data[srcIdx+rgb]
+            scaImg.data[(x + y * scaImg.width)*4+3] = srcImg.data[srcIdx+3] // alpha
+        }
+    }
+    return scaImg
+}
 
 const phaseName = {
     game: "GAME",
@@ -63,10 +120,9 @@ const phaseName = {
     ban: "BAN",
 }
 
-// TODO: should be a clear state function to reset
 let streamState = {
     // currentTs: null, //timestamp of current canvas
-    currentState: null, //phase
+    // currentState: null, //phase
     accum: 0,           // tracking stuff for timer sync
     frameBuf: [],       // ts: timestamp taken, 
                         // phase: gamephase NAME, 
@@ -74,14 +130,20 @@ let streamState = {
     timer: {            // last known timer screenshot 
         countup: false, //
         ts: null,       // when time was determined
-        time: null,     // time in seconds
+        time: null,     // TODO: change to seconds
     },
-    teams: []           // Team names
+    teams: [],           // Team names
+}
+streamState.clean = () => { // Clean the state and let phase/timer/teams get resynced
+    streamState.frameBuf = [];
+    streamState.timer.ts = null;
+    streamState.timer.time = null;
+    streamState.teams = []
 }
 
 // Determine phase
 // check, format is [% of image, pixel threshold] ordered by most popular
-// grab, just image of the resulting start
+// grab, just rect of the thing
 let streamPhase = {
     game: {
             name: phaseName.game,
@@ -173,7 +235,7 @@ let streamPhase = {
     }
 }
 
-function scr() { // grab frame & save to canvas buffer, takes about 20-35ms on my laptop with 30% CPU
+function scr() { // grab frame & save to canvas buffer, takes about 20-35ms on my laptop 
     let p = performance.now()
     if (!videoFrame.parentElement) //sometimes video ref is lost
         videoFrame = videoFrame.querySelector('video')
@@ -187,18 +249,6 @@ function scr() { // grab frame & save to canvas buffer, takes about 20-35ms on m
     while(streamState.frameBuf.length > 30) { //clean buffer, per .5s = 15s
         streamState.frameBuf.pop()
     }
-}
-    
-// quality actually affects the pixel density, thus % based units
-function genSquare(x, x2, y, y2) {
-    return [Math.round(x*videoFrame.videoWidth), Math.round(y*videoFrame.videoHeight), 
-            Math.round((x2-x)*videoFrame.videoWidth), Math.round((y2-y)*videoFrame.videoHeight)]
-}
-function genLine(c1, c2, p1, xaxis=true) {
-    // width/height gets set to 1 automatically
-    let [cx, cy] = xaxis ? [[c1, (c2-c1)], [p1, 1/videoFrame.videoHeight]] : [[p1, 1/videoFrame.videoWidth], [c1, (c2-c1)]]
-    return [Math.round(cx[0]*videoFrame.videoWidth), Math.round(cy[0]*videoFrame.videoHeight), 
-            Math.round(cx[1]*videoFrame.videoWidth), Math.round(cy[1]*videoFrame.videoHeight)]
 }
 
 let phaseOrder = [ streamPhase.game, streamPhase.ban, streamPhase.wait, streamPhase.replay, 
@@ -277,7 +327,7 @@ stateDiv.style.color = 'snow'
 stateDiv.style.fontSize = '20px'
 
 let debugDivBuffer = []
-for (let i=0; i<8; i++) {
+for (let i=0; i<phaseOrder.length; i++) {
     let debugDiv = document.createElement('div')
     document.querySelector('canvas').before(debugDiv) //youtube debug*
     debugDiv.style.color = 'snow'
@@ -309,10 +359,9 @@ function debugverifyAllPhases() { // Debug verify all phases with on screen stuf
             `<span style='color:${check_pass ? 'limegreen' : 'red'}'>${check_pass}</span> \t` + 
             `| ${phaseTime}ms \t| ${px_set_str}`;
 
-        if (check_pass) {foundState = foundState ? foundState : checkObj} //take first 
+        if (check_pass) {foundState = foundState ? foundState : checkObj} // take first only
     }
 
-    // run async :(
     resolvePhase(foundState) 
     // console.log("Done with all phases")
 }
@@ -323,46 +372,48 @@ async function resolvePhase (foundState) {
     if (foundState == streamPhase.game) {
         streamState.frameBuf[0].phase = streamPhase.game.name
         // if new state
-        let p = performance.now()
-        let promisesOCR = [promiseTeamNames(streamPhase.game)]
-        promisesOCR[2] = promiseText(streamPhase.game.grab.timer, true, 560, 3)
+        if (getLastKnownState()[0] != streamPhase.game.name) {
+            let p = performance.now()
+            let promisesOCR = [promiseTeamNames(streamPhase.game, true)] //only runs once
+            streamState.timer.countup = true
+            syncTimer(streamPhase.game)
         
-        // resolving both team names & timer at same time, but I'll move timer out of this soon
-        Promise.all(promisesOCR).then( (arr) => {
-            p = performance.now() - p
-            setTimerObj(arr[3])
-            stateDiv.innerHTML = `${streamState.teams[0]} vs. ${streamState.teams[1]}  ${arr[0].trim()} in ${p}ms`
-        })
-
-        // setGamePhaseData()
+            Promise.all(promisesOCR).then( (arr) => {
+                p = performance.now() - p
+                stateDiv.innerHTML = `${streamState.teams[0]} vs. ${streamState.teams[1]}  ${arr[0].trim()} in ${p}ms`
+            })
+        }
         // set accum, do timer sync every 20s & team sync 30s
+
+
     } else if (foundState == streamPhase.wait) {
         // ON NEW: sync timer & team names
         streamState.frameBuf[0].phase = streamPhase.wait.name
         let p = performance.now()
-        let promisesOCR = []
-        promisesOCR.concat( promiseTeamNames(streamPhase.wait) ) // could be 2 or less
-        // this works without numeric, but doesnt affect timing
-        // let timer_str = lintTimerString(recognizeText(streamPhase.wait.grab.timer, true, 175, 1)) //takes 280ms. thats wait too much
+        if (getLastKnownState()[0] != streamPhase.wait.name) {
+            let promisesOCR = []
+            promisesOCR.concat( promiseTeamNames(streamPhase.wait, true) ) // could be 2 or less
+
+            streamState.timer.countup = false
+            syncTimer(streamPhase.wait, 0) // this is async basically
+            streamState.accum = 0
+            
+            // Resolve team promises
+            Promise.all(promisesOCR).then( () => {
+                p = performance.now() - p
+                // trigger update event or what
+                stateDiv.innerHTML = `${streamState.teams[0]} vs. ${streamState.teams[1]} in ${p}ms`
+            })
+        }
         
-        let timer_str = ""
-        promisesOCR[2] = new Promise(resolve => { // timer takes 100ms with scaling damn
-            OCRAD(binarization(scaImg(canvasctx.getImageData(...streamPhase.wait.grab.timer), 0.3), 
-                    560), {numeric:true}, resolve)
-        }).then( str => timer_str = str.trim())
-        // promiseText(streamPhase.wait.grab.timer, true, 560, 0.3)
-        //                     .then(str => timer_str = str.trim())
-        // promisesOCR[2] = promiseText(streamPhase.wait.grab.timer)
-        // promisesOCR[2].then( str => {timer_str = str; setTimerObj(str)})
-        
-        // Resolve OCR promises
-        Promise.all(promisesOCR).then( () => {
-            p = performance.now() - p
-            setTimerObj(timer_str)
-            // trigger update event or what
-            stateDiv.innerHTML = `${streamState.teams[0]} vs. ${streamState.teams[1]}  ${timer_str} in ${p}ms`
-        })
-        
+        // gonna assume timer is accurate and never resync it here
+
+        // let timer_str = ""
+        // promisesOCR[2] = new Promise(resolve => { // timer takes 100ms with scaling damn
+        //     OCRAD(binarization(scaImg(canvasctx.getImageData(...streamPhase.wait.grab.timer), 0.3), 
+        //             560), {numeric:true}, resolve)
+        // }).then( str => timer_str = str.trim())
+
         // console.log(`finished all task for WAIT ${performance.now() - p}ms`)
     } else if (foundState == streamPhase.pause_game) {
         streamState.frameBuf[0].phase = streamPhase.pause.name
@@ -373,14 +424,18 @@ async function resolvePhase (foundState) {
         // in case of chronobreak, game/wait will force reset timer
         // for pause2, just display pause cause we will lose the timer.
     } else if (foundState == streamPhase.ban) {
+        streamState.frameBuf[0].phase = streamPhase.ban.name
         // TODO: Clear timer, set teams, do ban processing*
         streamState.timer.time = null
         streamState.timer.ts = null
-        let p = performance.now()
-        streamState.teams[0] = recognizeText(streamPhase.ban.grab.leftTeamName, false, 410, 1) // blue
-        streamState.teams[1] = recognizeText(streamPhase.ban.grab.rightTeamName, false, 430, 1) // purple
-        p = performance.now() - p
-        stateDiv.innerHTML = `${streamState.teams[0]} vs. ${streamState.teams[1]} in ${p}ms`
+        if (getLastKnownState()[0] != streamState.ban.name) {
+            console.log("Retrieving team names for state BAN")
+            let p = performance.now()
+            streamState.teams[0] = recognizeText(streamPhase.ban.grab.leftTeamName, false, 410, 1) // blue
+            streamState.teams[1] = recognizeText(streamPhase.ban.grab.rightTeamName, false, 430, 1) // purple
+            p = performance.now() - p
+            stateDiv.innerHTML = `${streamState.teams[0]} vs. ${streamState.teams[1]} in ${p}ms`
+        }
     } else if (foundState == streamPhase.replay || foundState == streamPhase.replay2) {
         // Show replay state, Don't change timer or teams
         streamState.frameBuf[0].phase = streamPhase.replay.name
@@ -400,7 +455,7 @@ async function promiseTeamNames(phase, force=false) {
 
     for (let i=0; i<2; i++) {
         if (!streamState.teams[i] || force) {
-            console.log('Getting team names')
+            console.log(`Getting team name ${i}`)
             prom = promiseText(teamRef[i])
             prom.then(str => teamSave[i] = str.trim()) // save directly to state
             if (!teamSave[i])    teamSave[i] = prom // only save promise to complete null check
@@ -410,159 +465,63 @@ async function promiseTeamNames(phase, force=false) {
     return teamPromises
 }
 
-let minTimeDrift = 70 // 70ms
+let minTimeSync = 70 // 70ms
 // 125ms is only noticeable side-by-side, at 62 you can't tell at all
 
-async function startSyncTimer(phase, retry=0)
-
-async function syncTimer(phase, retry=0, countup=false, options={}) {
-    let lastSyncTime = null     // Find last sync time
-    for (let f of streamState.frameBuf) {
-        if (f['data']['timer']) { // if this has been synced; will only be set
-            lastSyncTime = f['data']['timer']
-            break
-        }
+async function syncTimer(phase, retry=0) {
+    // New plan. First, promiseText to get the current timer.
+    if (retry > 3) {
+        console.log(`Thats retry no. ${retry}`)
     }
-
-    if (retry>2) {
-        console.log(`Too many retries`)
-        return
-    }
-    
-    // if lintTimerString fails or if the timer jitters >2s,
-    // we need to drop the whole sync and restart
-
-    // I'm gonna treat this as a recursive function start, bailing out when I fail
-    syncPrecision = 1000
-    console.log(`Syncing for 1000ms on retry ${retry}`)
-    let newestFrame = streamState.frameBuf[0]
-    // set timer state so it doesnt recast loop?
-
-    promiseText(phase.grab.timer, true, 560, 3).then( timer_str => {
-        // top-level 1000ms start. no sync check or time check
-        if (!lintTimerString(timer_str)) {
-            console.log("Failed to sync (no timer), retrying")
-            syncTimer(phase, retry++) // clear timer? cause we're not on the frametime anymore.
-            // should timeout this with nearest frametime
-        }
-        newestFrame['data']['timer'] = {
-            time: lintTimerString(timer_str), // this should be total seconds not string
-            sync: syncPrecision,
-            countup: countup
-        }
-        console.log(`synced at ${syncPrecision}ms`)
-        let timeElasped = 500 - (Date.now() - streamState.frameBuf[0].ts) 
-
-        // now this is the recurse down
-        // damn this needs to be its own function I think, so it can call itself
-        setTimeout( 
+    let breakSync = false   // Break sync timeout/promise if this is true* and resync
+    let p = performance.now()
+    let scale = (phase == streamPhase.wait) ? 0.3 : 3 // will hard-code this away but testing game now
+    let promiseTimer = promiseText(phase.grab.timer, true, 560, scale).then(timer_str => {
+        timer_str = lintTimerString(timer_str) // this is a str so I need parseInt, do I always want a num from this? or both?
+        if (timer_str) {
+            streamState.timer.time = parseInt(timer_str.substring(0,2))*60 
+                                    + parseInt(timer_str.substring(2,4))
+        } //else reject the timer, restart sync. need a break timeout value
     })
-}
+    // Then brute force imageData every 70ms to find where the time changed to find the tick over
+    // checking imageData is way faster than OCR and less error prone
+    // I can actually target JUST the right-most digit, but not rn
+    let lastTimerImg = canvasctx.getImageData(...phase.grab.timer)
+    let startTs = streamState.frameBuf[0].ts
+    let timeElasped = 0
+    let syncIntTimer = () => {  // Timing on my computer shows around 20-45ms 
+        if (!videoFrame.parentElement) 
+            videoFrame = videoFrame.querySelector('video')
+        canvasctx.drawImage(videoFrame, ...phase.grab.timer, ...phase.grab.timer) //just grab the timer actually
+        let p = performance.now()
+        timeElasped += 70
+        console.log(`Sync start @ ${timeElasped}`)
+        let currTimerImg = canvasctx.getImageData(...phase.grab.timer) //get image
 
-let timerMaxPrecision = 63
-async function recurseDown(syncPrecision, phase, retry) {
-
-    if (syncPrecision <= timerMaxPrecision) return
-
-    let lastSyncTime = null
-    for (let f of streamState.frameBuf) {
-        if (f['data']['timer']) {
-            lastSyncTime = f['data']['timer']
-            break
+        let pixelComparison = 0     // compare images
+        for (let i=0; i<currTimerImg.data.length; i+=4) {
+            pixelComparison += Math.abs(currTimerImg.data[i]-lastTimerImg.data[i]) + 
+                                Math.abs(currTimerImg.data[i+1]-lastTimerImg.data[i+1]) + 
+                                Math.abs(currTimerImg.data[i+2]-lastTimerImg.data[i+2])
         }
-    }
-
-    // now confirm that sync is in order & valid
-    if (!lastSyncTime) {
-        console.log("Failed to sync timer, couldn't find the last sync")
-        syncTimer(phase, retry++)
-    } else {
-        console.log(`Syncing for ${syncPrecision}ms`)
-        if (syncPrecision < 500) scr() // Take screenshot if less than
-        // Need to do Promise to get new sync time
-        // Might need a special promise to work on selected frames? cause I'm basically
-        // saving to the wrong frame here if I'm not careful
-        promiseText(phase.grab.timer, true, 560, 3).then( timer_str => {
-            let nowDate = Date.now()
-            if (nowDate - streamState.frameBuf[0].ts > 70) {
+        pixelComparison /= (currTimerImg.data.length * 3/4)// convert to percentage
+        if (pixelComparison > 0.2) {    // timer synced so quit
+            streamState.timer.ts = startTs + timeElasped //set the ts based on this
+            console.log(`Took ${performance.now()-p}ms to finish sync, found at ${timeElasped}`)
+            // make a new new promise? that resolves both time & ts for debug I guess
+        } else {
+            if (timeElasped > 1000) {
                 console.log("You took too long. Now your candy's gone.")
-                syncTimer(retry++)
+                return
             }
-            let timerdir = lastSyncTime.countup ? 1 : -1
-            if (dateNow - lastSyncTime.time) // ah this is so confusing omg why is this async
-            // why is it always async
-        })
-        // then I can ensure time is in sync, and has the proper number
-    }
-
-}
-
-}
-    if (!lastSyncTime) { // this gets run after scr so we dont need a new one
-        let newFrame = streamState.frameBuf[0]
-        console.log("syncing for 1000ms")
-        // AAAAAAHH I need to do the special timer stuff- pretend its game only right now
-        promiseText(phase.grab.timer, true, 560, 3).then( timer_str => {
-            newFrame['data']['timer'] = {
-                time: lintTimerString(timer_str),
-                sync: 1000
-            }
-            console.log("synced at 1000ms")
-            // timeout func for wait for the next frame
-        })
-    } else {        // now lets start to sync down
-        let newSync = lastSyncTime['sync'] / 2
-        
-        // do timeout on the next captured frame without taking a screenshot
-        setTimeout( (syncPrecision) => {
-            if (newSync < 500) scr() // take closer screenshot
-
-            promiseText(phase.grab.timer, true, 560, 3).then( (timer_str) => {
-                let nowDate = Date.now()
-                if (nowDate - streamState.frameBuf[0].ts > 70) 
-                    nowDate = null // break sync, but for now pass
-                    
-                // ensure that last known timer is synced with this
-                streamState.frameBuf[0]['data']['timer'] = {
-                    time: lintTimerString(timer_str),
-                    sync: syncPrecision
-                }
-
-                // if timer_str > new store, 1-sync/2 or 
-            })
-        } ,550, newSync);
-    }
-}
-
-function recognizeText(rect, numeric=false, thres=560, scale=1, tesseract=false) {
-    // use different OCR on tesseract arg
-    let imageData = canvasctx.getImageData(...rect)
-    if (tesseract) { // Tesseract - TODO: add numeric options if required
-        // binarization and copy back to canvas with no scaling
-        canvasctx.putImageData(binarization(imageData, thres, true), 0, 0)
-        let t_promise = t_worker.recognize(canvas, tesseract_rect(rect))
-        // Tesseract needs a promise return and I dont want to do that cause this func isnt async
-        // let str = (await t_promise).data.text.trim();
-        return str
-    } else { // OCRAD
-        // binarization and scaling with image data
-        imageData = scaImg(binarization(imageData, thres), scale)
-        let str = (numeric) ? OCRAD(imageData, {numeric: true}).trim() : OCRAD(imageData).trim()
-        return str
-    }
-}
-
-function promiseText(rect, numeric=false, thres=560, scale=1) {
-    // dont wanna talk about it; OCRAD only right now
-    let imageData = canvasctx.getImageData(...rect) //testing shows <4ms, just using it sync
-    imageData = binarization(scaImg(imageData, scale), thres)
-    return new Promise( (resolve, reject) => {
-        if (numeric) 
-            OCRAD(imageData, {numeric: true}, resolve)
-        else {
-            OCRAD(imageData, resolve)
+            lastTimerImg = currTimerImg
+            console.log(`Sync ${pixelComparison} at ${timeElasped}ms, took ${performance.now()-p}ms`)
+            setTimeout(syncIntTimer, 70) // same timeout, try again next time
         }
-    })
+    }
+
+    setTimeout(syncIntTimer, 70)    // Start it off
+    console.log(`Took ${performance.now()-p} to resolve sync`)
 }
 
 let stateIgnore = 5 //seconds TODO: change to constant
@@ -570,9 +529,9 @@ function getLastKnownState() {
     let numIgnored = 0
     for (let f=0; f<streamState.frameBuf.length; f++) {
         if (streamState.frameBuf[f].phase) {
-                return [frame.phase, f]
+                return [streamState.frameBuf[f].phase, f]
         } else {
-            if (!(numIgnored++ > stateIgnore)) //skip N frames until unknown is returned
+            if (!(numIgnored++ > stateIgnore)) //skip N unknown frames
                 continue
             return [null, f]
         }
@@ -581,17 +540,10 @@ function getLastKnownState() {
 }
 
 /*
-00_##
-can become 0_##
-during 02_00 it became 0200 - fairly common every 30s
-on 02_30 - 02_35 the 2nd didgit disappeared multiple times
-sometimes there's a space between 11 to 1 1
-might bw 98% accurate so ditch invalid values?#
-at 15_26 - 15_28 we lose a number
-18_18 missed a digit 18_1
-reading a 6 as a 5 in 26:30
+OCRAD usually gets timer as 00_00 or 0000 or 000 (missing a number or 2)
+therefore we lint and reject anything thats not 4 nums
+also it can read a 5 as a 6 which might cause issues
 */
-
 function lintTimerString(timer_str) {
     // string MUST contain 4 digits 00:00 to 99:99
     let valid_str = ""
@@ -603,68 +555,6 @@ function lintTimerString(timer_str) {
     return valid_str
 }
 
-function setTimerObj(timer_str) {
-    timer_str = lintTimerString(timer_str)
-    if (timer_str) {
-        streamState.timer.time = parseInt(timer_str.substring(0,2))*60 + 
-                                            timer_str.substring(2,4)
-        streamState.timer.ts = streamState.frameBuf[0].ts
-    }
-    return (timer_str!=null)
-}
-
-async function setGamePhaseData () {
-    // console.log('IN GAME state')
-    // let imageData = canvasctx.getImageData(...streamPhase.game.grab.timer)
-    // imageData = upscaleImg(binarization(imageData, 255), 3)
-    let p = performance.now()
-    streamState.teams[0] = recognizeText(streamPhase.game.grab.leftTeamName)
-    streamState.teams[1] = recognizeText(streamPhase.game.grab.rightTeamName)
-    let timer_str = lintTimerString(recognizeText(streamPhase.game.grab.timer, true, 560, 3))
-    p = performance.now() - p
-
-    if (timer_str) {
-        streamState.timer.time = parseInt(timer_str.substring(0,2))*60 + 
-                                                    timer_str.substring(2,4)
-        streamState.timer.ts = streamState.frameBuf[0].ts
-        //TODO: Start to do the timer stagger to check state
-    }
-    stateDiv.innerHTML = `${streamState.teams[0]} vs. ${streamState.teams[1]}  ${timer_str} in ${p}ms`
-    // After state* is set, push an event to update the timer over p2p
-}
-
-// Binarization to improve the OCR with a b/w image
-// most UI is white on dark colours, so thats why invert true
-// threshold goes to 765
-function binarization(imagedata, threshold=175, invert=true) {
-    let bw = invert ? [0, 0xFF] : [0xFF, 0]
-    let binImage = new ImageData(imagedata.width, imagedata.height)
-    for (let i=0; i < imagedata.data.length; i += 4) {
-        px_sum = imagedata.data[i] + imagedata.data[i+1] + imagedata.data[i+2]
-        bin = (px_sum > threshold) ? bw[0] : bw[1]
-        binImage.data[i] = binImage.data[i+1] = binImage.data[i+2] = bin
-        binImage.data[i+3] = 255
-    }
-    return binImage
-}
-
-// thanks to LinusU cause I was doing src -> dist
-function scaImg(srcImg, scale=1, pixelheight=0) {
-    if (scale == 1) return srcImg // Dont do this thanks
-    let scaImg = new ImageData(srcImg.width*scale, srcImg.height*scale)
-    for (let y=0; y < scaImg.height; y++) {
-        for (let x=0; x < scaImg.width; x++) {
-            let srcX = Math.round(x * srcImg.width / scaImg.width)
-            let srcY = Math.round(y * srcImg.height / scaImg.height)
-            let srcIdx = (srcX + srcY * srcImg.width) * 4
-
-            for (let rgb=0; rgb<3; rgb++)
-                scaImg.data[(x + y * scaImg.width)*4+rgb] = srcImg.data[srcIdx+rgb]
-            scaImg.data[(x + y * scaImg.width)*4+3] = srcImg.data[srcIdx+3] // alpha
-        }
-    }
-    return scaImg
-}
 
 function debugTimeThis(func) {
     let p = performance.now()
