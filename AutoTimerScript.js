@@ -130,21 +130,23 @@ let streamState = {
     timer: {            // last known timer screenshot 
         countup: false, //
         ts: null,       // when time was determined
-        time: null,     // TODO: change to seconds
+        seconds: null,     // TODO: change to seconds
     },
     teams: [],           // Team names
 }
 streamState.clean = () => { // Clean the state and let phase/timer/teams get resynced
     streamState.frameBuf = [];
     streamState.timer.ts = null;
-    streamState.timer.time = null;
-    streamState.teams = []
+    streamState.timer.seconds = null;
+    streamState.teams = [];
+    streamState.accum = 0
 }
 
 // Determine phase
 // check, format is [% of image, pixel threshold] ordered by most popular
 // grab, just rect of the thing
-let streamPhase = {
+// TODO: Change name to phase ONLY
+let phase = {
     game: {
             name: phaseName.game,
             check: [{
@@ -166,7 +168,7 @@ let streamPhase = {
         name: phaseName.game,
         debugName: "GAME END",
         check: [{   rect: genLine(.1, .9, .05),
-                        px_thres: { 0xa078b7: [0.65, 50]}
+                        px_thres: { 0xa078b7: [0.65, 40]} 
         }]
     },
     wait: {
@@ -208,8 +210,8 @@ let streamPhase = {
                 // }, 
                 // checks lower at the team names
                 {       rect: genLine(.43, .58, .905),
-                        px_thres: {0x000527: [.50, 20], 0x27eafc: [.05, 25], // checks for blue/purple
-                                    0xb267b9: [.05, 25]}
+                        px_thres: {0x000527: [.50, 20], 0x27eafc: [.045, 30], // checks for blue/purple
+                                    0xb267b9: [.045, 30]} //G2 clocks an impressive 4.8 without the arrow
 
                 }],
         grab: {
@@ -227,8 +229,7 @@ let streamPhase = {
     },
     pause2: {
         name: phaseName.pause,
-        // checks the GAME PAUSE text
-        // similar UI in this position do not have white text here*
+        // Middle analysis desk YAMATOCANNON triggers this
         check: [{ rect: genLine(.45, .55, .81), 
                         px_thres: {0xfaffff: [.26, 10], 0x010729: [.35, 30]} // why does this vary?
         }]
@@ -251,8 +252,8 @@ function scr() { // grab frame & save to canvas buffer, takes about 20-35ms on m
     }
 }
 
-let phaseOrder = [ streamPhase.game, streamPhase.ban, streamPhase.wait, streamPhase.replay, 
-    streamPhase.replay2, streamPhase.pause_game, streamPhase.pause2, streamPhase.gameend]
+let phaseOrder = [ phase.game, phase.ban, phase.wait, phase.replay, 
+    phase.replay2, phase.pause_game, phase.pause2, phase.gameend]
 
 function debugDraw(rect, refresh=false) { //rect is an array of [x,y,w,h]
     if (refresh)  scr()
@@ -357,7 +358,7 @@ function debugverifyAllPhases() { // Debug verify all phases with on screen stuf
         debugDivBuffer[phase_idx++].innerHTML = 
             `<span style='width: 8em; display: inline-block;'>${checkObj.debugName?checkObj.debugName : checkObj.name}:</span> ` + 
             `<span style='color:${check_pass ? 'limegreen' : 'red'}'>${check_pass}</span> \t` + 
-            `| ${phaseTime}ms \t| ${px_set_str}`;
+            `| ${phaseTime.toFixed(3)}ms \t| ${px_set_str}`;
 
         if (check_pass) {foundState = foundState ? foundState : checkObj} // take first only
     }
@@ -366,79 +367,97 @@ function debugverifyAllPhases() { // Debug verify all phases with on screen stuf
     // console.log("Done with all phases")
 }
 
-async function resolvePhase (foundState) {
+function resolvePhase (foundState) {
     // Ok lets start grabbing info and testing
     
-    if (foundState == streamPhase.game) {
-        streamState.frameBuf[0].phase = streamPhase.game.name
+    if (foundState == phase.game) {
         // if new state
-        if (getLastKnownState()[0] != streamPhase.game.name) {
+        if (getLastKnownState()[0] != phase.game.name) {
             let p = performance.now()
-            let promisesOCR = [promiseTeamNames(streamPhase.game, true)] //only runs once
+            streamState.accum = 0
+            // let promisesOCR = promiseTeamNames(phase.game, true) //only runs once
+            streamState.teams[0] = recognizeText(phase.game.grab.leftTeamName)
+            streamState.teams[1] = recognizeText(phase.game.grab.rightTeamName)
             streamState.timer.countup = true
-            syncTimer(streamPhase.game)
+            syncTimer(phase.game)
         
-            Promise.all(promisesOCR).then( (arr) => {
+            // Promise.all(promisesOCR).then( (arr) => {
                 p = performance.now() - p
-                stateDiv.innerHTML = `${streamState.teams[0]} vs. ${streamState.teams[1]}  ${arr[0].trim()} in ${p}ms`
+                stateDiv.innerHTML = `${streamState.teams[0]} vs. ${streamState.teams[1]}  in ${p}ms`
+            // })
+        }
+        streamState.frameBuf[0].phase = phase.game.name
+        // set accum, do timer sync every 20s & team sync 30s
+        streamState.accum++
+        if (streamState.accum >= 40 && streamState.accum % 40 == 0) {
+            console.log(`Accum too high, do a check pls`)
+            let estTimerText = getTimerText()
+            promiseText(phase.game.grab.timer, true, 560, 3).then(timer_str => {
+                timer_arr = lintTimerString(timer_str)
+                if (!timer_arr || `${timer_arr[0]}:${timer_arr[1]}` != getTimerText())
+                    console.log(`check mismatch ${timer_arr[0]}:${timer_arr[1]} ${estTimerText}`)
+                    //Do a sync here on frame timer
             })
         }
-        // set accum, do timer sync every 20s & team sync 30s
+        if (streamState.accum >= 120) {     // every 60s
+            console.log('Accum max, do a team sync and wipe')
+            streamState.accum = 0
+            streamState.teams[0] = recognizeText(phase.game.grab.leftTeamName)
+            streamState.teams[1] = recognizeText(phase.game.grab.rightTeamName)
+        }
 
-
-    } else if (foundState == streamPhase.wait) {
+    } else if (foundState == phase.wait) {
         // ON NEW: sync timer & team names
-        streamState.frameBuf[0].phase = streamPhase.wait.name
         let p = performance.now()
-        if (getLastKnownState()[0] != streamPhase.wait.name) {
-            let promisesOCR = []
-            promisesOCR.concat( promiseTeamNames(streamPhase.wait, true) ) // could be 2 or less
-
+        if (getLastKnownState()[0] != phase.wait.name) {
+            //Consider using sync text here
+            // let promisesOCR = promiseTeamNames(phase.wait, true)  // could be 2 or less
             streamState.timer.countup = false
-            syncTimer(streamPhase.wait, 0) // this is async basically
+            syncTimer(phase.wait, 0) // this is async basically
             streamState.accum = 0
             
             // Resolve team promises
-            Promise.all(promisesOCR).then( () => {
-                p = performance.now() - p
-                // trigger update event or what
-                stateDiv.innerHTML = `${streamState.teams[0]} vs. ${streamState.teams[1]} in ${p}ms`
-            })
-        }
-        
-        // gonna assume timer is accurate and never resync it here
-
-        // let timer_str = ""
-        // promisesOCR[2] = new Promise(resolve => { // timer takes 100ms with scaling damn
-        //     OCRAD(binarization(scaImg(canvasctx.getImageData(...streamPhase.wait.grab.timer), 0.3), 
-        //             560), {numeric:true}, resolve)
-        // }).then( str => timer_str = str.trim())
-
-        // console.log(`finished all task for WAIT ${performance.now() - p}ms`)
-    } else if (foundState == streamPhase.pause_game) {
-        streamState.frameBuf[0].phase = streamPhase.pause.name
-        // freeze timer until phase changes
-        streamState.timer.ts = null
-        // TODO: do the timer calc server side then set the timer.time to value
-
-        // in case of chronobreak, game/wait will force reset timer
-        // for pause2, just display pause cause we will lose the timer.
-    } else if (foundState == streamPhase.ban) {
-        streamState.frameBuf[0].phase = streamPhase.ban.name
-        // TODO: Clear timer, set teams, do ban processing*
-        streamState.timer.time = null
-        streamState.timer.ts = null
-        if (getLastKnownState()[0] != streamState.ban.name) {
-            console.log("Retrieving team names for state BAN")
-            let p = performance.now()
-            streamState.teams[0] = recognizeText(streamPhase.ban.grab.leftTeamName, false, 410, 1) // blue
-            streamState.teams[1] = recognizeText(streamPhase.ban.grab.rightTeamName, false, 430, 1) // purple
+            // Promise.all(promisesOCR).then( (arr) => {
+            //     p = performance.now() - p
+            //     // trigger update event or what
+            //     stateDiv.innerHTML = `${streamState.teams[0]} vs. ${streamState.teams[1]} in ${p}ms`
+            // })
+            streamState.teams[0] = recognizeText(phase.wait.grab.leftTeamName)
+            streamState.teams[1] = recognizeText(phase.wait.grab.rightTeamName)
             p = performance.now() - p
             stateDiv.innerHTML = `${streamState.teams[0]} vs. ${streamState.teams[1]} in ${p}ms`
         }
-    } else if (foundState == streamPhase.replay || foundState == streamPhase.replay2) {
+        
+        streamState.frameBuf[0].phase = phase.wait.name
+        streamState.accum++
+        // gonna assume timer is accurate and never resync it here; but if you pause/skip ahead :/
+        // So I'm just gonna assume only the game state is volatile cause of 
+
+        // console.log(`finished all task for WAIT ${performance.now() - p}ms`)
+    } else if (foundState == phase.pause_game) {
+        streamState.frameBuf[0].phase = phase.pause.name
+        // freeze timer until phase changes
+        // TODO: do the timer calc server side then set the timer.seconds to value
+        streamState.timer.ts = null
+
+        // in case of chronobreak, game/wait will force reset timer
+        // for pause2, just display pause cause we will lose the timer.
+    } else if (foundState == phase.ban) {
+        streamState.frameBuf[0].phase = phase.ban.name
+        // TODO: Do ban processing*
+        streamState.timer.seconds = null
+        streamState.timer.ts = null
+        if (getLastKnownState()[0] != phase.ban.name) {
+            console.log("Retrieving team names for state BAN")
+            let p = performance.now()
+            streamState.teams[0] = recognizeText(phase.ban.grab.leftTeamName, false, 410, 1) // blue
+            streamState.teams[1] = recognizeText(phase.ban.grab.rightTeamName, false, 430, 1) // purple
+            p = performance.now() - p
+            stateDiv.innerHTML = `${streamState.teams[0]} vs. ${streamState.teams[1]} in ${p}ms`
+        }
+    } else if (foundState == phase.replay || foundState == phase.replay2) {
         // Show replay state, Don't change timer or teams
-        streamState.frameBuf[0].phase = streamPhase.replay.name
+        streamState.frameBuf[0].phase = phase.replay.name
     } else if (!foundState) {
         // unknown state
         // wait 5s to confirm this before resetting timer/teams
@@ -447,40 +466,24 @@ async function resolvePhase (foundState) {
     }
 }
 
-async function promiseTeamNames(phase, force=false) {
-    // check if team names are current
-    let teamPromises = [], prom = null
-    let teamRef = [phase.grab.leftTeamName, phase.grab.rightTeamName]
-    let teamSave = streamState.teams
-
-    for (let i=0; i<2; i++) {
-        if (!streamState.teams[i] || force) {
-            console.log(`Getting team name ${i}`)
-            prom = promiseText(teamRef[i])
-            prom.then(str => teamSave[i] = str.trim()) // save directly to state
-            if (!teamSave[i])    teamSave[i] = prom // only save promise to complete null check
-            teamPromises[i] = prom
-        }
-    }
-    return teamPromises
-}
-
-let minTimeSync = 70 // 70ms
+const minTimeSync = 70 // 70ms
 // 125ms is only noticeable side-by-side, at 62 you can't tell at all
 
-async function syncTimer(phase, retry=0) {
+// Make this async, return a value when the timer is synced to use as promise
+function syncTimer(phase, retry=0) {
     // New plan. First, promiseText to get the current timer.
     if (retry > 3) {
         console.log(`Thats retry no. ${retry}`)
     }
+    // TODO: Resolve breakSync properly
+    // TODO: Resolve promiseTimer with an event
     let breakSync = false   // Break sync timeout/promise if this is true* and resync
     let p = performance.now()
-    let scale = (phase == streamPhase.wait) ? 0.3 : 3 // will hard-code this away but testing game now
+    let scale = (phase == phase.wait) ? 0.3 : 3 // will hard-code this away but testing game now
     let promiseTimer = promiseText(phase.grab.timer, true, 560, scale).then(timer_str => {
-        timer_str = lintTimerString(timer_str) // this is a str so I need parseInt, do I always want a num from this? or both?
-        if (timer_str) {
-            streamState.timer.time = parseInt(timer_str.substring(0,2))*60 
-                                    + parseInt(timer_str.substring(2,4))
+        timer_arr = lintTimerString(timer_str) // this is a str so I need parseInt, do I always want a num from this? or both?
+        if (timer_arr) {
+            streamState.timer.seconds = parseInt(timer_arr[0])*60 + parseInt(timer_arr[1])
         } //else reject the timer, restart sync. need a break timeout value
     })
     // Then brute force imageData every 70ms to find where the time changed to find the tick over
@@ -494,7 +497,7 @@ async function syncTimer(phase, retry=0) {
             videoFrame = videoFrame.querySelector('video')
         canvasctx.drawImage(videoFrame, ...phase.grab.timer, ...phase.grab.timer) //just grab the timer actually
         let p = performance.now()
-        timeElasped += 70
+        timeElasped += minTimeSync
         console.log(`Sync start @ ${timeElasped}`)
         let currTimerImg = canvasctx.getImageData(...phase.grab.timer) //get image
 
@@ -506,25 +509,26 @@ async function syncTimer(phase, retry=0) {
         }
         pixelComparison /= (currTimerImg.data.length * 3/4)// convert to percentage
         if (pixelComparison > 0.2) {    // timer synced so quit
-            streamState.timer.ts = startTs + timeElasped //set the ts based on this
-            console.log(`Took ${performance.now()-p}ms to finish sync, found at ${timeElasped}`)
+            streamState.timer.ts = startTs + timeElasped // TODO: Date.now should be more accurate
+            streamState.timer.seconds += 1 // Time just moved
+            console.log(`Took ${performance.now()-p}ms to finish sync @ ${pixelComparison}, found at ${timeElasped}`)
             // make a new new promise? that resolves both time & ts for debug I guess
         } else {
             if (timeElasped > 1000) {
                 console.log("You took too long. Now your candy's gone.")
                 return
             }
-            lastTimerImg = currTimerImg
+            lastTimerImg = currTimerImg // Might not need this, but it covers smaller flucutations
             console.log(`Sync ${pixelComparison} at ${timeElasped}ms, took ${performance.now()-p}ms`)
-            setTimeout(syncIntTimer, 70) // same timeout, try again next time
+            setTimeout(syncIntTimer, minTimeSync) // same timeout, try again next time
         }
     }
 
-    setTimeout(syncIntTimer, 70)    // Start it off
-    console.log(`Took ${performance.now()-p} to resolve sync`)
+    setTimeout(syncIntTimer, minTimeSync)    // Start it off
+    console.log(`Took ${performance.now()-p} to resolve begin sync`)
 }
 
-let stateIgnore = 5 //seconds TODO: change to constant
+const stateIgnore = 5 //seconds TODO: change to constant
 function getLastKnownState() {
     let numIgnored = 0
     for (let f=0; f<streamState.frameBuf.length; f++) {
@@ -542,7 +546,7 @@ function getLastKnownState() {
 /*
 OCRAD usually gets timer as 00_00 or 0000 or 000 (missing a number or 2)
 therefore we lint and reject anything thats not 4 nums
-also it can read a 5 as a 6 which might cause issues
+also it can read a 5 as a 6 OR 5 as a 3 which might cause issues
 */
 function lintTimerString(timer_str) {
     // string MUST contain 4 digits 00:00 to 99:99
@@ -552,9 +556,15 @@ function lintTimerString(timer_str) {
             valid_str += timer_str[l]
     }
     if (valid_str.length < 4) return null
-    return valid_str
+    return [valid_str.substring(0,2), valid_str.substring(2,4)]
 }
 
+function getTimerText() {
+    // Get timer as shown in minutes:seconds from the object
+    let secondsToNow = (Date.now() - streamState.timer.ts)/1000, timerSecs = streamState.timer.seconds
+    timerSecs += (streamState.timer.countup) ? secondsToNow : -secondsToNow
+    return `${Math.trunc(timerSecs / 60).toString().padStart(2,'0')}:${Math.trunc(timerSecs % 60).toString().padStart(2,'0')}`
+}
 
 function debugTimeThis(func) {
     let p = performance.now()
@@ -577,7 +587,16 @@ var SM = () => {
 }
 // also about 10% CPU damn
 
-   
+// Begin WebRTC implementation testing
+const webRTCConfig = {'iceServers': [{'url': 'stun:stun1.l.google.com:19302'}, 
+        {'url': 'stun:stun.l.google.com:19302'},{'url': 'stun:stun.services.mozilla.com:3478'}]}
+const peerConnection = new RTCPeerConnection(webRTCConfig)
+
+let offer = await peerConnection.createOffer()
+await peerConnection.setLocalDescription(offer)
+console.log("This is the offer:")
+console.log(offer)
+
 
 /*  Game checks
 GAME CHECK
