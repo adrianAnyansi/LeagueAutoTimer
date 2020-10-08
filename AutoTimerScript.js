@@ -588,12 +588,66 @@ var SM = () => {
 // also about 10% CPU damn
 
 // Begin WebRTC implementation testing
-const webRTCConfig = {'iceServers': [{'url': 'stun:stun1.l.google.com:19302'}, 
-        {'url': 'stun:stun.l.google.com:19302'},{'url': 'stun:stun.services.mozilla.com:3478'}]}
+
+// const stunServers =  [{'url': 'stun:stun1.l.google.com:19302'}, {'url': 'stun:stun.l.google.com:19302'},{'url': 'stun:stun.services.mozilla.com:3478'}]
+const stunServers = []
+const webRTCConfig = {'iceServers': stunServers}
 const peerConnection = new RTCPeerConnection(webRTCConfig)
+const peerDataChannel = null
+const wsUrl = 'ws://localhost:8080'
+const randomPass = 'LLKJAHSDF[OASKFDB'
 
 let offer = await peerConnection.createOffer()
 await peerConnection.setLocalDescription(offer)
+let signalWs = new WebSocket(wsUrl)
+
+peerConnection.addEventListener('icecandidate', event => {
+    if (event.candidate) {
+        signalWs.send(JSON.stringify({
+            monitor: randomPass,
+            'iceCandiate': event.candidate
+        }))
+        console.log(`Resolving ${event.candidate}`)
+    }
+})
+peerConnection.addEventListener('connectionstatechange', event => {
+    if (peerConnection.connectionState === 'connected') {
+        console.log('We did it! Start up the data channel')
+    }
+});
+
+signalWs.addEventListener('open', () => {
+    signalWs.send(JSON.stringify({ 
+        monitor: randomPass,
+        offer: offer,
+        forceConnect: true
+    }))
+})
+
+signalWs.addEventListener('message', async (event) => {
+    let msg = JSON.parse(event.data)
+    if (msg.offer) { // parse offer
+        peerConnection.setRemoteDescription(new RTCSessionDescription(msg.offer))
+        let answer = await peerConnection.createAnswer()
+        await peerConnection.setLocalDescription(answer)
+        signalWs.send(JSON.stringify({
+            monitor: randomPass,
+            answer: answer
+        }))
+        console.log("Recieved offer, sent answer")
+        peerDataChannel = peerConnection.createDataChannel('LeagueAutoTimer')
+    } else if (msg.iceCandiate) {
+        try {
+            console.log("Recieved ice cand.")
+            await peerConnection.addIceCandidate(msg.iceCandiate) //maybe doesnt need to be async?
+        } catch (e) {
+            console.error('uh oh spaghettos', e)
+        }
+    }
+})
+
+
+
 console.log("This is the offer:")
 console.log(offer)
 

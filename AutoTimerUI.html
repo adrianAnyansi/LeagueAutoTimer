@@ -1,0 +1,211 @@
+<html>
+    <head>
+        <title>League Auto Timer</title>
+        <meta charset="utf-8"/>
+        <style>
+            body {
+                background-color: #0f1519;
+                color: snow;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+
+                font-family: 'Colfax',Helvetica,sans-serif;
+            }
+            #connectionStatus {
+                margin-top: 4em;
+                white-space: pre;
+                line-height: 2;
+            }
+            #teamNameDiv {
+                display: flex;
+                align-items: center;
+            }
+            .teamName {
+                font-size: 30px;
+                transform: scale(1.1, 1.2);
+                padding: 0 10px;
+                font-weight: 600;
+                color: lightgray;
+                user-select: none;
+            }
+            #leftTeamName {
+                color: #a9b9f5;
+            }
+            #rightTeamName {
+                color: #f5bcbc;
+            }
+            .teamVs {
+                color: gray;
+                font-size: 20px;
+                padding: 0 10px;
+            }
+            .bigTimer {
+                font-size: 150px;
+                margin: 0;
+                user-select: none;
+            }
+            .phaseDiv {
+                font-weight: 600;
+                color: gray;
+                height: 0
+            }
+            .phaseDiv span {
+                padding: 0 1em;
+                color: #2f3539;
+            }
+            div.highlight, span.highlight {
+                color: snow;
+            }
+        </style>
+    </head>
+    <body>
+        <p id="upBuffer" class="status"></p>
+        <div id="teamNameDiv">
+            <span contentEditable="true" id="leftTeamName" class="teamName blueTeam">TL</span>
+            <img id="leftLogo" 
+                src="https://am-a.akamaihd.net/image/?resize=100:&f=http%3A%2F%2Fstatic.lolesports.com%2Fteams%2F1592590875575_TeamLiquidTL-01-FullonDark.png">
+            <span class="teamVs">vs</span>
+            <img id="rightLogo">
+            <span contentEditable="true" id="rightTeamName" class="teamName redTeam">G2</span>
+        </div>
+        <div class="phaseDiv">
+            <span>PAUSE</span>
+            <span>GAME END</span>
+            <span>REPLAY</span>
+            <span>UNKNOWN</span>
+        </div>
+        <div>
+            <span class="bigTimer">23:40</span> 
+        </div>
+        
+        <p id="connectionStatus" class="status"></p>
+    </body>
+
+</html>
+<script>
+    // https://am-a.akamaihd.net/image/?resize=70:&f=http%3A%2F%2Fstatic.lolesports.com%2Fteams%2F1592590875575_TeamLiquidTL-01-FullonDark.png
+    const logoPrefix = "https://am-a.akamaihd.net/image/?resize=80:&f=http%3A%2F%2Fstatic.lolesports.com%2Fteams%"
+    const logoPostfix = "-01-FullonDark.png"
+    const teamImg = {
+        TL: '2F1592590875575_TeamLiquidTL',
+        G2: '2F1592591333874_G2G2',
+        MCX: '2F1592588618196_MachiMCX',
+        SN: '2F1592592023323_SuningSN',
+        DWN: '2F1592589259480_DamwonGamingDWG',
+        JDG: '2F1592591827851_JDGamingJDG',
+        RGE: '2F1592591512937_RogueRGE',
+        PSG: '2F1600106840359_TalonPSG',
+        GEN: '2F1592589327622_Gen.GGEN',
+        FNC: '2F1592591295307_FnaticFNC',
+        LGD: '2F1592591876371_LGDGamingLGD',
+        TSM: '2F1592590917094_TSMTSM',
+        TES: '2F1592592064571_TopEsportsTES',
+        DRX: '2F1592589284897_DRXDRX',
+        FLY: '2F1592590438547_FlyQuestFLY',
+        UOL: 'https://am-a.akamaihd.net/image/?resize=70:&f=https%3A%2F%2Flolstatic-a.akamaihd.net%2Fesports-assets%2Fproduction%2Fteam%2Funicorns-of-love-8qvakeja.png'
+    }
+
+    let streamState = {
+        teams: [],
+        timer: {
+            ts: null,
+            timer: null
+        }
+    }
+    // lazy load all images?
+
+    document.querySelector('#leftLogo').src = logoPrefix + teamImg.TL + logoPostfix
+    document.querySelector('#leftTeamName').textContent = 'TL'
+    document.querySelector('#leftTeamName').addEventListener('input', (event) => {
+        console.log('got change')
+    })
+    document.querySelector('#rightLogo').src = logoPrefix + teamImg.DRX + logoPostfix
+    document.querySelector('#rightTeamName').textContent = 'DRX'
+
+    const webRTCConfig = {'iceServers': []}
+    const peerConnection = new RTCPeerConnection(webRTCConfig)
+    const peerDataChannel = null
+    const wsUrl = 'ws://localhost:8080'
+    const randomPass = 'LLKJAHSDF[OASKFDB'
+    const connStatusEl = document.querySelector('#connectionStatus')
+    let signalWs = null
+
+    const buildRTC = async () => {
+        peerConnection.addEventListener('icecandidate', event => {
+            if (event.candidate) {
+                signalWs.send(JSON.stringify({
+                    timer: randomPass,
+                    'iceCandiate': event.candidate
+                }))
+                console.log(`Resolving ${event.candidate}`)
+            }
+        })
+        peerConnection.addEventListener('connectionstatechange', event => {
+            if (peerConnection.connectionState === 'connected') {
+                console.log('We did it! Start up the data channel')
+                connStatusEl.textContent += "Connected to monitor!\n"
+            }
+        });
+        peerConnection.addEventListener('datachannel', event => {
+            peerDataChannel = event.channel;
+            connStatusEl.textContent += "P2P DataChannel is open!\n"
+            signalWs.removeEventListener('close')
+            signalWs.close(1000)
+            peerDataChannel.addEventListener('message', (event) => {
+                let msg = JSON.stringify(event.data)
+                //TODO: Do some processing here thx
+                console.log(`Recieved data message from monitor ${msg}`)
+                // 3 outcomes: Either we change the timer, change teams or phase change shows new info
+            })
+        });
+
+        let offer = await peerConnection.createOffer()
+        await peerConnection.setLocalDescription(offer)
+        signalWs = new WebSocket(wsUrl)
+        connStatusEl.textContent = "Connecting to signaling server-\n"
+        signalWs.addEventListener('open', () => {
+            connStatusEl.textContent += "Sending offer to signaling server...\n"
+            signalWs.send(JSON.stringify({ 
+                timer: randomPass,
+                offer: offer,
+                forceConnect: true
+            }))
+        })
+        signalWs.addEventListener('close', (event) => {
+            connStatusEl.textContent = "Failed to connect to signaling server.\n"
+            switch (event.code) {
+                case 1006:
+                    connStatusEl.textContent += "Connection Refused. Please Refresh"
+                    break
+                case 1013:
+                case 1003:
+                    connStatusEl.textContent += "Invalid passcode"
+                    break
+                case 1008:
+                    connStatusEl.textContent += "Did not perform signalling in the required timeframe."
+                    break
+                default:
+                    connStatusEl.textContent += "Unknown reason"
+            }
+        })
+        signalWs.addEventListener('message', async (event) => {
+            let msg = JSON.parse(event.data)
+            //TODO: Parse offer as well
+            if (msg.answer) { // parse answer
+                peerConnection.setRemoteDescription(new RTCSessionDescription(msg.answer))
+                connStatusEl.textContent += "Recieved answer from monitor-\n"
+            } else if (msg.iceCandiate) {
+                try {
+                    await peerConnection.addIceCandidate(msg.iceCandiate)
+                } catch (e) {
+                    console.error('uh oh spaghettos', e)
+                }
+            }
+        })
+
+    }
+
+    buildRTC()
+</script>
