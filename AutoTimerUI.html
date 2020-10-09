@@ -16,11 +16,44 @@
             #connectionStatus {
                 margin-top: 4em;
                 white-space: pre;
-                line-height: 2;
+                line-height: 1.4;
             }
             #teamNameDiv {
                 display: flex;
                 align-items: center;
+                position: relative;
+            }
+            .dropdown {
+                background: #3f3539;
+                position: absolute;    
+                font-weight: 600;
+                text-align: center;
+                top: 100%;
+                padding: 0.3em 0;
+                margin: 0;
+                left: 0; /* left by default */
+                display: none
+            }
+            .dropdown.right {
+                right: 0;
+                left: unset;
+            }
+            .dropdown.show {
+                display: block;
+            }
+            .dropdown ul {
+                margin: 0;
+                padding: 0.3em 0.6em;
+                /* cursor: pointer; */
+            }
+            .dropdown ul:nth-child(2n) {
+                background-color: #2f2529
+            }
+            .dropdown ul.keyselect {
+                background-color: blue
+            }
+            .dropdown ul.hide {
+                display: none
             }
             .teamName {
                 font-size: 30px;
@@ -41,15 +74,22 @@
                 font-size: 20px;
                 padding: 0 10px;
             }
+
             .bigTimer {
                 font-size: 150px;
                 margin: 0;
                 user-select: none;
+                font-family: monospace;
+            }
+            .bigTimer.blank {
+                color: lightgray;
+                transition: color 1s;
             }
             .phaseDiv {
                 font-weight: 600;
                 color: gray;
-                height: 0
+                height: 0;
+                padding-top: 0.2em;
             }
             .phaseDiv span {
                 padding: 0 1em;
@@ -64,35 +104,44 @@
         <p id="upBuffer" class="status"></p>
         <div id="teamNameDiv">
             <span contentEditable="true" id="leftTeamName" class="teamName blueTeam">TL</span>
-            <img id="leftLogo" 
-                src="https://am-a.akamaihd.net/image/?resize=100:&f=http%3A%2F%2Fstatic.lolesports.com%2Fteams%2F1592590875575_TeamLiquidTL-01-FullonDark.png">
+            <img id="leftLogo">
             <span class="teamVs">vs</span>
             <img id="rightLogo">
             <span contentEditable="true" id="rightTeamName" class="teamName redTeam">G2</span>
+            
+            <div class="dropdown">
+            </div>
         </div>
         <div class="phaseDiv">
-            <span>PAUSE</span>
-            <span>GAME END</span>
-            <span>REPLAY</span>
-            <span>UNKNOWN</span>
+            <span id="mainPhase">UNKNOWN</span>
+            <span id="phaseInfo">GAME END</span>
+            <!-- <span>REPLAY</span> -->
+            <!-- <span>UNKNOWN</span> -->
         </div>
         <div>
-            <span class="bigTimer">23:40</span> 
+            <span  class="bigTimer">01:20</span> 
         </div>
-        
         <p id="connectionStatus" class="status"></p>
+        <div>
+            <span>Blank input OR click auto to trigger auto </span>
+            <p>Left Team Name: <input/> <button>AUTO</button></p>
+            <p>Right Team Name: <input/> <button>AUTO</button></p>
+        </div>
     </body>
 
 </html>
 <script>
+
+    // lazy load all images?
     // https://am-a.akamaihd.net/image/?resize=70:&f=http%3A%2F%2Fstatic.lolesports.com%2Fteams%2F1592590875575_TeamLiquidTL-01-FullonDark.png
     const logoPrefix = "https://am-a.akamaihd.net/image/?resize=80:&f=http%3A%2F%2Fstatic.lolesports.com%2Fteams%"
     const logoPostfix = "-01-FullonDark.png"
+    const logoPostfix1 = "-01-FullonDark1.png"
     const teamImg = {
-        TL: '2F1592590875575_TeamLiquidTL',
-        G2: '2F1592591333874_G2G2',
-        MCX: '2F1592588618196_MachiMCX',
         SN: '2F1592592023323_SuningSN',
+        G2: '2F1592591333874_G2G2',
+        TL: '2F1592590875575_TeamLiquidTL',
+        MCX: '2F1592588618196_MachiMCX',
         DWN: '2F1592589259480_DamwonGamingDWG',
         JDG: '2F1592591827851_JDGamingJDG',
         RGE: '2F1592591512937_RogueRGE',
@@ -106,30 +155,92 @@
         FLY: '2F1592590438547_FlyQuestFLY',
         UOL: 'https://am-a.akamaihd.net/image/?resize=70:&f=https%3A%2F%2Flolstatic-a.akamaihd.net%2Fesports-assets%2Fproduction%2Fteam%2Funicorns-of-love-8qvakeja.png'
     }
-
-    let streamState = {
+    
+    
+    let timerState = {
         teams: [],
         timer: {
             ts: null,
-            timer: null
+            seconds: null,
+            countup: true
+        },
+        timerInterval: null
+    }
+
+    const timerEl = document.querySelector('.bigTimer')
+    const connStatusEl = document.querySelector('#connectionStatus')
+
+    const teamDropdown = document.querySelector('.dropdown')
+    let teamList = []
+    let teamListEl = []
+    let dropdownSelect = 0
+    for (let team of Object.keys(teamImg)) {
+        let ul = document.createElement('UL')
+        ul.textContent = team
+        teamDropdown.append(ul)
+        teamListEl.push(ul)
+        teamList.push(team)
+    }
+
+    const teamLeftName = document.querySelector('#leftTeamName')
+    const teamLeftLogo = document.querySelector('#leftLogo')
+    const teamRightName = document.querySelector('#rightTeamName')
+    const teamRightLogo = document.querySelector('#rightLogo')
+
+    const teamObj = [{ name: teamLeftName, logo: teamLeftLogo }, { name:teamRightName, logo: teamRightLogo }]
+
+    teamLeftLogo.src = getTeamLogo('TL')
+    teamLeftName.textContent = 'TL'
+    teamRightLogo.src = getTeamLogo('DRX')
+    teamRightName.textContent = 'DRX'
+    teamLeftName.addEventListener('blur', blurTeamName(false))
+    teamRightName.addEventListener('blur', blurTeamName(true))
+    teamLeftName.addEventListener('input', inputTeamName)
+    teamRightName.addEventListener('input', inputTeamName)
+    teamLeftName.addEventListener('focus', focusTeamName(false))
+    teamRightName.addEventListener('focus', focusTeamName(true))
+    teamLeftName.addEventListener('keydown', keydownTeamName)
+    teamRightName.addEventListener('keydown', keydownTeamName)
+
+    function blurTeamName (rightSide) {
+        return function (event) {
+            teamDropdown.classList.remove('show')
+            let topMost = teamList.filter(val => val.includes(event.target.textContent.toUpperCase()))
+            // console.log(topMost)
+            event.target.textContent = topMost.length != 0 ? topMost[0] : 'G2' // why is this truthy WTF
+            
+            if (rightSide)
+                teamRightLogo.src = getTeamLogo(teamRightName.textContent)
+            else
+                teamLeftLogo.src = getTeamLogo(teamLeftName.textContent)
         }
     }
-    // lazy load all images?
+    function focusTeamName (rightSide) {
+        return function (event) {
+            dropdownSelect = 0
+            teamDropdown.classList.add('show')
+            teamDropdown.classList.toggle('right', rightSide)
+        }
+    }
+    function inputTeamName (event) {
+        let teamTxt = event.target.textContent.toUpperCase()
+        for (let i=0; i<teamList.length; i++) {
+            teamListEl[i].classList.toggle('hide', !teamList[i].includes(teamTxt))
+        }
+    }
+    function keydownTeamName (event) {
+        if (event.key == 'Enter') { // set the team name
+            event.target.blur()
+            event.preventDefault()
+            console.log("We out")
+        }
+    }
 
-    document.querySelector('#leftLogo').src = logoPrefix + teamImg.TL + logoPostfix
-    document.querySelector('#leftTeamName').textContent = 'TL'
-    document.querySelector('#leftTeamName').addEventListener('input', (event) => {
-        console.log('got change')
-    })
-    document.querySelector('#rightLogo').src = logoPrefix + teamImg.DRX + logoPostfix
-    document.querySelector('#rightTeamName').textContent = 'DRX'
-
-    const webRTCConfig = {'iceServers': []}
+    const webRTCConfig = {'iceServers': []} // empty STUN servers means only local P2P permitted
     const peerConnection = new RTCPeerConnection(webRTCConfig)
-    const peerDataChannel = null
+    let peerDataChannel = null
     const wsUrl = 'ws://localhost:8080'
     const randomPass = 'LLKJAHSDF[OASKFDB'
-    const connStatusEl = document.querySelector('#connectionStatus')
     let signalWs = null
 
     const buildRTC = async () => {
@@ -144,37 +255,22 @@
         })
         peerConnection.addEventListener('connectionstatechange', event => {
             if (peerConnection.connectionState === 'connected') {
-                console.log('We did it! Start up the data channel')
-                connStatusEl.textContent += "Connected to monitor!\n"
+                // console.log('We did it! Start up the data channel')
+                connStatusEl.textContent += "Connected to monitor!\n" // fade to black
+                signalWs.close(1000)
             }
         });
-        peerConnection.addEventListener('datachannel', event => {
-            peerDataChannel = event.channel;
-            connStatusEl.textContent += "P2P DataChannel is open!\n"
-            signalWs.removeEventListener('close')
-            signalWs.close(1000)
-            peerDataChannel.addEventListener('message', (event) => {
-                let msg = JSON.stringify(event.data)
-                //TODO: Do some processing here thx
-                console.log(`Recieved data message from monitor ${msg}`)
-                // 3 outcomes: Either we change the timer, change teams or phase change shows new info
-            })
-        });
 
-        let offer = await peerConnection.createOffer()
-        await peerConnection.setLocalDescription(offer)
         signalWs = new WebSocket(wsUrl)
-        connStatusEl.textContent = "Connecting to signaling server-\n"
-        signalWs.addEventListener('open', () => {
-            connStatusEl.textContent += "Sending offer to signaling server...\n"
+        signalWs.addEventListener('open', async () => {
+            connStatusEl.textContent += "Connecting to signaling server...\n"
             signalWs.send(JSON.stringify({ 
                 timer: randomPass,
-                offer: offer,
-                forceConnect: true
+                register: true,
             }))
         })
         signalWs.addEventListener('close', (event) => {
-            connStatusEl.textContent = "Failed to connect to signaling server.\n"
+            connStatusEl.textContent = "WS to signaling server closed.\n"
             switch (event.code) {
                 case 1006:
                     connStatusEl.textContent += "Connection Refused. Please Refresh"
@@ -186,14 +282,25 @@
                 case 1008:
                     connStatusEl.textContent += "Did not perform signalling in the required timeframe."
                     break
-                default:
-                    connStatusEl.textContent += "Unknown reason"
+                case 1000:
+                    connStatusEl.textContent += "Signaling successful\n"
             }
         })
         signalWs.addEventListener('message', async (event) => {
             let msg = JSON.parse(event.data)
-            //TODO: Parse offer as well
-            if (msg.answer) { // parse answer
+            if (msg.paired) { // connected to signal server, and conn to monitor available
+                connStatusEl.textContent += "Paired with monitor...\n"
+                // You must create the datachannel before the OFFER!
+                peerDataChannel = peerConnection.createDataChannel('LeagueAutoTimer:Monitor')
+                peerDataChannel.addEventListener('message', processMonitorEvent)
+                let offer = await peerConnection.createOffer()
+                await peerConnection.setLocalDescription(offer)
+                connStatusEl.textContent += "Sending offer to monitor...\n"
+                signalWs.send(JSON.stringify({ 
+                    timer: randomPass,
+                    offer: offer,
+                }))
+            } else if (msg.answer) { // parse answer
                 peerConnection.setRemoteDescription(new RTCSessionDescription(msg.answer))
                 connStatusEl.textContent += "Recieved answer from monitor-\n"
             } else if (msg.iceCandiate) {
@@ -204,8 +311,76 @@
                 }
             }
         })
+    }
+    buildRTC()
 
+function processMonitorEvent(event) {
+    let monitorState = JSON.parse(event.data)
+    console.log(`Got some data from monitor ${monitorState}`)
+
+    // There are only 3 possibilities-
+    // 1 - Update the timer, freezing or changing the sync
+    if (!monitorState.timer.seconds) { // if seconds null, ts doesn't matter, blank output
+        timerEl.textContent = '--:--'
+        timerEl.classList.add('blank')
+    } else {
+        timerEl.textContent = getTimerText(monitorState.timer) // handles ts & no ts
+        timerEl.classList.remove('blank')
+        
+        // if no sec, clear. no sec + (ts or no ts)
+        // if sec, no ts, set timer if different
+        // if sec, ts, set timer & and set interval
+        if (monitorState.timer.ts == null) { // frozen timer, remove tick
+            clearInterval(timerState.timerInterval)
+        } else if (monitorState.timer.ts != timerState.timer.ts) {
+            let msToTick = 1000 - ((Date.now() - monitorState.timer.ts) % 1000)
+            setTimeout( ()=> {
+                timerEl.textContent = getTimerText(monitorState.timer)
+                timerState.timerInterval = setInterval(() => {
+                    timerEl.textContent = getTimerText(timerState.timer)
+                }, 1000) // runs every second
+            }, msToTick+30 );
+            console.log(`Set interval to start in ${msToTick}ms + 30`)
+        }
+    }
+    timerState.timer = monitorState.timer // do object overwrite, ensure we dont hold ref any of these objects
+
+    // 2 - Change teams
+    for (let idx=0; idx < monitorState.teams.length && idx < 2; idx++) {
+        if (monitorState.teams[idx] != timerState.teams[idx]) {
+            teamObj[idx].logo.src = getTeamLogo(monitorState.teams[idx])
+            teamObj[idx].name.textContent = monitorState.teams[idx]
+
+            timerState.teams[idx] = monitorState.teams[idx]
+            console.log(`Changed team ${idx}`)
+        }
     }
 
-    buildRTC()
+    // 3 - State change
+    // Still deliberating whether to have one phase name or multiple
+
+    connStatusEl.textContent = JSON.stringify(monitorState, null, 1)
+}
+
+function getTeamLogo(teamName) {
+    switch (teamName.toUpperCase()) {
+        case "UOL":
+            return teamImg['UOL']
+        case "PSG":
+            return logoPrefix + teamImg['PSG'] + logoPostfix1
+        default:
+            return logoPrefix + teamImg[teamName.toUpperCase()] + logoPostfix 
+    }
+
+}
+
+function getTimerText(timer) {
+    // Get timer as shown in minutes:seconds from the object
+    let secondsToNow = 0, timerSecs = timer.seconds
+    if (timer.ts) // if no timestamp, frozen time
+        secondsToNow = (Date.now() - timer.ts)/1000
+    timerSecs += (timer.countup) ? secondsToNow : -secondsToNow
+    if (timerSecs < 0) timerSecs = 0 // No negative numbers
+    return `${Math.trunc(timerSecs / 60).toString().padStart(2,'0')}:${Math.trunc(timerSecs % 60).toString().padStart(2,'0')}`
+}
 </script>

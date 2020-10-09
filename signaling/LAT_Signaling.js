@@ -1,6 +1,7 @@
 const http = require('http')
 const ws = require('ws')
 const url = require('url')
+const fs = require('fs').promises
 
 // WebSocket server for LeagueAutoTimer to perform WebRTC Signalling
 
@@ -22,6 +23,17 @@ const httpServer = http.createServer( (req, res) => {
         res.write(JSON.stringify(monitorMap) + '\n')
         res.write(JSON.stringify(timerMap) + '\n')
         res.end()
+    } else if (url == "/js") {
+        fs.readFile(__dirname + "/../AutoTimerScript.js").then( file => { 
+            console.log(`Serving js at ${Date.now()}`) 
+            res.setHeader("Content-Type", "application/javascript")
+            res.writeHead(200)
+            res.end(file) // Apparently this loads per request, which is great cause that means free reload
+        }).catch(err => {
+            res.writeHead(500)
+            res.end(err)
+            return
+        })
     }
 })
 
@@ -33,49 +45,87 @@ wsServer.on('connection', function (ws) {
     wsConnects++
 
     let registerProp = null
+    let sMap = null
+    let tMap = null
+    let type = null
+    let passcode = null
     // TODO: Add variables to the ws to be persistent
     ws.on('message', (wsMsg) => {
         try {
             let msg = JSON.parse(wsMsg)
             // console.log(msg)
-            let [sMap, oName, tMap] = msg['monitor'] ? wsPair[0] : (msg['timer'] ? wsPair[1] : null)
-            // console.log(`${oName} ${sMap} ${tMap}`)
-            if (!sMap) {
-                console.log("ws message wasn't tagged")
-                ws.close(1003, 'JSON object was untagged') // Reject
-                return
-            } else if (sMap[msg[oName]] && sMap[msg[oName]] != ws) {  // Reject on collision cause 
-                ws.close(1013, 'Collision occurred')
+            if (msg['register'] && !sMap) {
+                if (msg['monitor'])
+                    [sMap, type, tMap] = wsPair[0]
+                else if (msg['timer'])
+                    [sMap, type, tMap] = wsPair[1]
+                else {
+                    console.log("ws message wasn't tagged")
+                    ws.close(1003, 'JSON object was untagged') // Reject
+                    return   
+                }
+                passcode = msg[type]
+                if (sMap[passcode] && sMap[passcode] != ws) {
+                    ws.close(1013, 'Collision occurred')
+                    return    
+                }
+                
+                console.log(`${type} ${passcode} registered`)
+                sMap[passcode] = ws
+                if (tMap[passcode] && sMap[passcode]) { // Successful pair
+                    console.log(`Paired success for ${passcode}`)
+                    let pairedText = JSON.stringify({ register:true, paired: true })
+                    tMap[passcode].send(pairedText)
+                    sMap[passcode].send(pairedText)
+                }
                 return
             }
-            let pass = msg[oName]
-            sMap[pass] = ws 
 
-            if (pass) { // if msg is tagged monitor/timer
-                console.log(`Caught msg from ${oName} ${pass}`)
-                registerProp = [sMap, pass, oName]
-                if (tMap[pass]) {
-                    tMap[pass].send(wsMsg)
-                    console.log(`sent to other ${pass}`)
+            if (passcode) {
+                console.log(`Caught msg from ${type} ${passcode}`)
+                if (tMap[passcode]) {
+                    tMap[passcode].send(wsMsg)
+                    // console.log(`sent to other ${passcode}`)
                 }
             }
+
+
+            // [sMap, type, tMap] = msg['monitor'] ? wsPair[0] : (msg['timer'] ? wsPair[1] : null)
+            // // console.log(`${oName} ${sMap} ${tMap}`)
+            // if (!sMap) {
+            // } else if (sMap[msg[oName]] && sMap[msg[oName]] != ws) {  // Reject on collision cause 
+            //     ws.close(1013, 'Collision occurred')
+            //     return
+            // }
+            // let pass = msg[oName]
+            // sMap[pass] = ws 
+
+            // if (pass) { // if msg is tagged monitor/timer
+            //     console.log(`Caught msg from ${oName} ${pass}`)
+            //     registerProp = [sMap, pass, oName]
+            //     if (tMap[pass]) {
+            //         tMap[pass].send(wsMsg)
+            //         console.log(`sent to other ${pass}`)
+            //     }
+            // }
         } catch (e) {
             console.log(`An error occurred ${e}`)
         }
     })
 
+    let wsTimeout = setTimeout( ()=> {
+        console.log(`Times up ${type} ${passcode}`)
+        ws.close(1008, 'Took too long to signal')
+    }, 30000) // You have 10s
+
     ws.on('close', (code, reason) => {
         clearInterval(wsTimeout)
         console.log(`ws closed code: ${code}, ${reason}`)
-        if (registerProp)
-            registerProp[0] = null
+        if (passcode && sMap) {
+            sMap[passcode] = null
+            delete sMap[passcode]
+        }
     })
-
-    let wsTimeout = setTimeout( ()=> {
-        console.log(`Times up ${registerProp[2]} ${registerProp[1]}`)
-        registerProp[0][registerProp[1]] = null
-        ws.close(1008, 'Took too long to signal')
-    }, 30000) // You have 10s
 })
 
 let port = 8080

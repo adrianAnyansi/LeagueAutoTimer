@@ -561,7 +561,9 @@ function lintTimerString(timer_str) {
 
 function getTimerText() {
     // Get timer as shown in minutes:seconds from the object
-    let secondsToNow = (Date.now() - streamState.timer.ts)/1000, timerSecs = streamState.timer.seconds
+    let secondsToNow = 0, timerSecs = streamState.timer.seconds
+    if (streamState.timer.ts) // if no timestamp, frozen time
+        secondsToNow = (Date.now() - streamState.timer.ts)/1000
     timerSecs += (streamState.timer.countup) ? secondsToNow : -secondsToNow
     return `${Math.trunc(timerSecs / 60).toString().padStart(2,'0')}:${Math.trunc(timerSecs % 60).toString().padStart(2,'0')}`
 }
@@ -589,24 +591,21 @@ var SM = () => {
 
 // Begin WebRTC implementation testing
 
-// const stunServers =  [{'url': 'stun:stun1.l.google.com:19302'}, {'url': 'stun:stun.l.google.com:19302'},{'url': 'stun:stun.services.mozilla.com:3478'}]
-const stunServers = []
-const webRTCConfig = {'iceServers': stunServers}
+const webRTCConfig = {'iceServers': []} // No STUN Servers means only local router conn
 const peerConnection = new RTCPeerConnection(webRTCConfig)
-const peerDataChannel = null
+let peerDataChannel = null
 const wsUrl = 'ws://localhost:8080'
 const randomPass = 'LLKJAHSDF[OASKFDB'
-
-let offer = await peerConnection.createOffer()
-await peerConnection.setLocalDescription(offer)
-let signalWs = new WebSocket(wsUrl)
+let cacheICECandidate = []
 
 peerConnection.addEventListener('icecandidate', event => {
     if (event.candidate) {
-        signalWs.send(JSON.stringify({
-            monitor: randomPass,
-            'iceCandiate': event.candidate
-        }))
+        if (signalWs.readyState != WebSocket.OPEN) cacheICECandidate.push(event.candidate)
+        else 
+            signalWs.send(JSON.stringify({
+                monitor: randomPass,
+                'iceCandiate': event.candidate
+            }))
         console.log(`Resolving ${event.candidate}`)
     }
 })
@@ -615,18 +614,36 @@ peerConnection.addEventListener('connectionstatechange', event => {
         console.log('We did it! Start up the data channel')
     }
 });
+peerConnection.addEventListener('datachannel', event => {
+    peerDataChannel = event.channel;
+    signalWs.close(1000) // close signalling server
+    peerDataChannel.addEventListener('message', (event) => {
+        // Only event we'll get is a state reset*
+        let msg = JSON.stringify(event.data) // assume json only
+        //TODO: Do some processing here thx
+        console.log(`Recieved data message from timer ${msg}`)
+        // 3 outcomes: Either we change the timer, change teams or phase change shows new info
+    })
+});
+let signalWs = new WebSocket(wsUrl)
 
-signalWs.addEventListener('open', () => {
+signalWs.addEventListener('open', async () => {
+    // Seems Chrome and Firefox have different standards for what triggers ICE candidates
+    // Chrome will only do it when you create a data channel before the offer
+    // Firefox will do it early. Needs more testing
     signalWs.send(JSON.stringify({ 
         monitor: randomPass,
-        offer: offer,
-        forceConnect: true
+        register: true,
     }))
+    
 })
 
 signalWs.addEventListener('message', async (event) => {
     let msg = JSON.parse(event.data)
-    if (msg.offer) { // parse offer
+    if (msg.paired) {
+        // Timer must send the offer first
+        console.log("Paired with timer")
+    } else if (msg.offer) { // parse offer
         peerConnection.setRemoteDescription(new RTCSessionDescription(msg.offer))
         let answer = await peerConnection.createAnswer()
         await peerConnection.setLocalDescription(answer)
@@ -634,8 +651,8 @@ signalWs.addEventListener('message', async (event) => {
             monitor: randomPass,
             answer: answer
         }))
+        // peerDataChannel = peerConnection.createDataChannel('LeagueAutoTimer')
         console.log("Recieved offer, sent answer")
-        peerDataChannel = peerConnection.createDataChannel('LeagueAutoTimer')
     } else if (msg.iceCandiate) {
         try {
             console.log("Recieved ice cand.")
@@ -645,11 +662,6 @@ signalWs.addEventListener('message', async (event) => {
         }
     }
 })
-
-
-
-console.log("This is the offer:")
-console.log(offer)
 
 
 /*  Game checks
