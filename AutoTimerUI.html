@@ -406,7 +406,8 @@
     const webRTCConfig = {'iceServers': []} // empty STUN servers means only local P2P permitted
     const peerConnection = new RTCPeerConnection(webRTCConfig)
     let peerDataChannel = null
-    const wsUrl = 'ws://localhost:8080'
+    const signalAddr = 'wstest.leagueautotimer.dev'
+    const wsUrl = `ws://${signalAddr}:8080`
     // const randomPass = 'LLKJAHSDF[OASKFDB'
     let signalWs = null
     

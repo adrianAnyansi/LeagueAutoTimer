@@ -1,6 +1,9 @@
 # League Worlds 2020 Automatic Timer
 
 Browser script to auto track timers/data from the LoL 2020 Worlds UI
+
+![Example of Auto Timer in action](TimerExample.png)
+
 ## Instructions: AUTO mode
 1) Open a window in Incognito mode. (Not required, but recommended)
 
@@ -11,36 +14,36 @@ Browser script to auto track timers/data from the LoL 2020 Worlds UI
 Firefox:    `Ctrl+Shift+K` 	or 	`Tools -> Web Developer -> Web Console.`
 
 	Then make sure you're on the `Console` tab.
-![Image for Console Page]()
+![Image for Console Page](console_pic.png)
 
 4) Copy & Paste the following code and click ENTER
 	```javascript
-	let leagueAutoTimerPromise = fetch('<JS SCRIPT IN GITHUB></JS>').then(resp => resp.text())
+	let leagueAutoTimerPromise = fetch('https://raw.githubusercontent.com/adrianAnyansi/LeagueAutoTimer/main/AutoTimerScript.js').then(resp => resp.text())
 	.then(val => {console.log('League Auto Timer has downloaded'); return val;} )
 
 	eval((await leagueAutoTimerPromise))
 	```
 	
-    The script to start monitoring the video. A small UI will appear over the video title like so:
-	![Monitor UI]()
+    The script will start monitoring the video. A small UI will appear over the video title like so:
+	![Monitor UI](MonitorUI.png)
 
 5) Click the `OPEN TIMER` button to open a new window/tab that displays the TIMER. 
 
-	They should connect automatically using WebRTC. The small square next to `OPEN TIMER` will turn BLUE while connecting, (might take up a 1min) then GREEN when the VIDEO & TIMER are linked. 
+	It should connect automatically using WebRTC. The small square next to `OPEN TIMER` will turn BLUE while connecting, (might take up a 1min) then GREEN when the VIDEO & TIMER are linked. 
 
 6) Capture the timer window in OBS and enjoy! Use `RESET` button to refresh the state if there are errors.
 
 ## Instructions: MANUAL mode
-To use manual mode, use this link: [League Manual Timer]()
+To use manual mode, use this link: [League Manual Timer](https://league-auto-timer.s3.amazonaws.com/AutoTimerUI.html)
 
 - You can click on either TEAM, or the TIMER to edit and change them.
 - Click START TIMER button to start the timer. 
 
 # Known Issues
-Script is still being developed, let me know about any new issues at tobeanyansi@yahoo.co.uk
+Script is still being developed, let me know about any new issues at tobe.anyansi@gmail.com
 
 - You might need to refresh the stream/script and reopen the timer. Still debugging webRTC issues.
-- The Monitor UI is designed for utility and Dark Mode YT / Twitch. It looks bad cause so it can be visible on Light Mode.
+- The Monitor UI is designed for utility and looks ok in Dark Mode and bad in Light Mode.
 - Only tested at 1080p. No guarantee that it will work less than that.
 - The timer will take 2-4s to sync sometimes.
 	- also, OCRAD mixes up 5 / 3	 4 / 0 / 8 rarely. This will auto fix on later syncs.
@@ -48,7 +51,7 @@ Script is still being developed, let me know about any new issues at tobeanyansi
 - Only supports group stage teams.
 
 # Current Features
-- Tracks WAIT: (Ads between games), BAN: ban phase, GAME: in game, REPLAY: replays, PAUSE: pauses in game and out of game.
+- Tracks ban, game, replay, pause and ads states.
 - Tracks the timer and resyncs every 15s.
 - Tracks team names and displays logos
 - Can tell when pauses occur and pause timer, will keep timer playing during replays.
@@ -64,16 +67,17 @@ Script is still being developed, let me know about any new issues at tobeanyansi
 
 # FAQ
 ## How does this work?
-In the background, the script is taking screenshots of the video and checking parts of the image to determine whether its in game, in ban phase, replay, etc. That info gets passed to the TIMER window by WebRTC, which is a P2P connection directly from your PC to router back to PC. I'm using OCRAD.js for text recognition since its faster than Tesseract for realtime.
+In the background, the script is taking screenshots of the video and checking parts of the image for the overlay of the game, ban phase, replay, etc. That info gets passed to the TIMER window by WebRTC, which is a P2P connection directly from your PC to router back to PC. I'm using OCRAD.js for text recognition since its faster than Tesseract for realtime.
 
 ## Can this be done on a live-view site? Why not make a new website instead of a script?
 **No.**
 
 Once a video is embedded, its locked off from any other script on that website. Without doing some crazy proxying, I can't screenshot the video. So it's run on the YouTube/Twitch website, which acts like the script is from YT/Twitch itself.
-There are 3 options: Run in Console, Use proxies (which YT will not like) or use a Browser extension with extended. Imo it's the easiest one.
+
+Essentially there are 3 options: Run in Console, Use proxies (which YT will not like) or use a Browser extension. This is the easiest one.
 
 ## Is it secure?
-Yes, all data but one goes directly between browser windows. The script opens a WebSocket under a random password for signalling and closes it after 10s. And if opened in Incognito mode, the script can only access the Youtube video. 
+Yes, all data but one goes directly between browser windows. The script opens a WebSocket under a random password for signalling and closes it after 10s. And if opened in Incognito mode, the script can only access the Youtube video. The code is public so you can see what it does.
 
 ## Will you update this for LCS/LEC/LCK/LPL/etc?
 Probably not- there's a lot of manual work in determining each phase, i.e I can't use the minimap to track GAME phase since that is removed during PIP/camera work, I need to note the timer location for every timed phase, etc. This differs per broadcast team, and BAN phase differs per region. If I can make the phase discovery more efficient with automation, then perhaps. Likely I'll update this for international tournaments
