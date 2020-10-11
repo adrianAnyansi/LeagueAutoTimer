@@ -14,7 +14,7 @@
                 font-family: 'Colfax',Helvetica,sans-serif;
             }
             #connectionStatus {
-                margin-top: 4em;
+                margin-top: 7em;
                 white-space: pre;
                 line-height: 1.4;
             }
@@ -32,7 +32,8 @@
                 padding: 0.3em 0;
                 margin: 0;
                 left: 0; /* left by default */
-                display: none
+                display: none;
+                color: lightgray;
             }
             .dropdown.right {
                 right: 0;
@@ -62,6 +63,7 @@
                 font-weight: 600;
                 color: lightgray;
                 user-select: none;
+                min-width: 1em;
             }
             #leftTeamName {
                 color: #a9b9f5;
@@ -79,7 +81,8 @@
                 font-size: 150px;
                 margin: 0;
                 user-select: none;
-                font-family: monospace;
+                /* font-family: monospace; */
+                font-family: Consolas;
             }
             .bigTimer.blank {
                 color: lightgray;
@@ -98,10 +101,114 @@
             div.highlight, span.highlight {
                 color: snow;
             }
+            div.highlight.pausePhase, span.highlight.pausePhase {
+                color: aqua;
+            }
+            div.highlight.pausePhase, span.highlight.replayPhase {
+                color: orangered;
+            }
+
+            .manager > div {
+                /* border: 1px solid white; */
+                background-color: #182025;
+                padding: 10px;
+                margin: 1em;
+            }
+
+            .manager p {
+                color: lightgray;
+            }
+            .manager button {
+                font-size: 20px;
+                border: none;
+                background-color: #191414;
+                color: lightgray;
+                padding: 0.5em 1em;
+                border-radius: 5%;
+                cursor: pointer;
+            }
+            .manager button.auto.off {
+                background: #191414;
+                color: gray;
+                animation: none;
+            }
+            .manager button.auto {
+                background: linear-gradient(45deg, #fb5927, #d43a3a);
+                animation: bg-animation 2s linear infinite;
+                background-size: 400% 400%;
+            }
+            @keyframes bg-animation {
+                0% {
+                    background-position: 0% 50%;
+                }
+                50% {
+                    background-position: 100% 50%;
+                }
+                100% {
+                    background-position: 0% 50%;
+                }
+            }
+
+            .manager button {
+                background-color: #19428c;
+                color: snow;
+            }
+            .manager button:disabled {
+                cursor: not-allowed
+            }
+            .manager button:not(:disabled):hover {
+                background-color: #3563b7
+            }
+
+            .manager button#manualTimerBtn.stoptimer {
+                background-color: #c52828;
+            }
+            .titleEditText {            
+                font-size: 20px;
+                min-width: 3em;
+            }
+
+            .manager p.title {
+                margin: 0;
+                margin-bottom: 1em;
+                font-size: 24px;
+                font-weight: 600;
+                color: white;
+            }
+
+            .help {
+                border-radius: 50%;
+                padding: 0.1em 0.3em;
+                font-size: 15px;
+                background-color: #255484;
+                position: relative;
+                top: -10;
+                left: 0.5em;
+                cursor: pointer;
+            }
+
+            .note {
+                padding: 0.1em 0.5em;
+                background-color: #9e4d08;
+            }
+
+            .help:hover::after {
+                content: attr(help-text);
+                background-color: #272829;
+                position: absolute;
+                color: snow;
+                font-weight: 100;
+                left: 2em;
+                top: -1em;
+                white-space: nowrap;
+                padding: 0.5em 0.5em;
+                z-index: 100;
+            }
         </style>
     </head>
-    <body>
+    <body spellcheck="false">
         <p id="upBuffer" class="status"></p>
+        <p contenteditable="true" class="titleEditText">Title text you can edit / delete!</p>
         <div id="teamNameDiv">
             <span contentEditable="true" id="leftTeamName" class="teamName blueTeam">TL</span>
             <img id="leftLogo">
@@ -113,24 +220,43 @@
             </div>
         </div>
         <div class="phaseDiv">
-            <span id="mainPhase">UNKNOWN</span>
-            <span id="phaseInfo">GAME END</span>
+            <span id="mainPhase" style="font-size:22px">GAME</span>
+            <span id="phaseInfo">PAUSE</span>
+            <span id="phaseData">EXTRA</span>
             <!-- <span>REPLAY</span> -->
             <!-- <span>UNKNOWN</span> -->
         </div>
         <div>
-            <span  class="bigTimer">01:20</span> 
+            <span contenteditable="true" class="bigTimer">01:20</span> 
         </div>
-        <p id="connectionStatus" class="status"></p>
-        <div>
-            <span>Blank input OR click auto to trigger auto </span>
-            <p>Left Team Name: <input/> <button>AUTO</button></p>
-            <p>Right Team Name: <input/> <button>AUTO</button></p>
+
+        <div class="manager">
+            <p id="connectionStatus" class="status"></p>
+            <div class="manualManager">
+                <p class="title">Manual Controls
+                    <span class="help" help-text="Click either team name or the timer to edit it.">?</span>
+                </p>
+                <button id="manualTimerBtn"> Start Timer ▶ </button>
+            </div>
+            <div class="autoManager">
+                <p class="title">Auto Controls
+                    <!-- <span class="help" help-text="Disable these to manually change teams/timer.">?</span> -->
+                    <span class="help note" help-text="Changing AUTO settings is being worked on.">!</span>
+                <!-- <p>Partial AUTO will be added later. To enable AUTO, use the monitor to open the timer page.</p> -->
+                </p>
+                <button id="leftTeamAutoBtn" disabled class="off auto">Left Team Auto</button>
+                <button id="rightTeamAutoBtn" disabled class="off auto">Right Team Auto</button>
+                <button id="timerAutoBtn" disabled class="off auto">Timer Auto</button>
+            </div>
         </div>
     </body>
 
 </html>
 <script>
+    let debug = true
+
+    if (!debug)
+        connStatusEl.style.display = 'none'
 
     // lazy load all images?
     // https://am-a.akamaihd.net/image/?resize=70:&f=http%3A%2F%2Fstatic.lolesports.com%2Fteams%2F1592590875575_TeamLiquidTL-01-FullonDark.png
@@ -158,6 +284,7 @@
     
     
     let timerState = {
+        currPhase: null,
         teams: [],
         timer: {
             ts: null,
@@ -166,20 +293,48 @@
         },
         timerInterval: null
     }
+    let manualTimer = null // separate objects makes it a little easier to track
+    let manualTeams = null
+    let manualTimerInterval = null
+
+    const mainPhase = ["GAME", "WAIT", "BAN", "UNKNOWN"]
+    const subPhase = {"PAUSE": "GAME", "REPLAY": "GAME", "GAME END": "GAME",
+                        "PICK": "BAN"}
+
+    const mainPhaseEl = document.querySelector('#mainPhase')
+    const phaseInfoEl = document.querySelector('#phaseInfo')
+    const phaseDataEl = document.querySelector('#phaseData')
 
     const timerEl = document.querySelector('.bigTimer')
+    timerEl.addEventListener('blur', () => {
+        let timer_arr = parseTimerText(timerEl.textContent)
+        let valid_timer_str = `${timer_arr[0].padStart(2, '0')}:${timer_arr[1].padStart(2, '0')}`
+        if (valid_timer_str != timerEl.textContent)
+            timerEl.textContent = valid_timer_str
+    })
+    timerEl.addEventListener('keydown', keydownTeamName)
     const connStatusEl = document.querySelector('#connectionStatus')
+    const leftTeamAutoBtn = document.querySelector('#leftTeamAutoBtn')
+    const rightTeamAutoBtn = document.querySelector('#rightTeamAutoBtn')
+    const timerAutoBtn = document.querySelector('#timerAutoBtn')
+    const manualTimerBtn = document.querySelector('#manualTimerBtn')
+    manualTimerBtn.addEventListener('click', overrideTimer)
 
     const teamDropdown = document.querySelector('.dropdown')
     let teamList = []
     let teamListEl = []
     let dropdownSelect = 0
     for (let team of Object.keys(teamImg)) {
+        teamList.push(team)
+    }
+    teamList = teamList.sort()
+
+    for (let team of teamList) {
         let ul = document.createElement('UL')
         ul.textContent = team
         teamDropdown.append(ul)
         teamListEl.push(ul)
-        teamList.push(team)
+        // teamList.push(team)
     }
 
     const teamLeftName = document.querySelector('#leftTeamName')
@@ -240,8 +395,22 @@
     const peerConnection = new RTCPeerConnection(webRTCConfig)
     let peerDataChannel = null
     const wsUrl = 'ws://localhost:8080'
-    const randomPass = 'LLKJAHSDF[OASKFDB'
+    // const randomPass = 'LLKJAHSDF[OASKFDB'
     let signalWs = null
+    
+    let queryParam = window.location.href.match(/\?rgpfp=(\w+)/)
+    const randomPass = queryParam ? queryParam[1] : null // Get passcode
+    if (randomPass) {
+        // Enter auto mode
+        document.querySelector('.manualManager').style.display = 'none'
+        teamLeftName.setAttribute('contenteditable', false)
+        teamRightName.setAttribute('contenteditable', false)
+        timerEl.setAttribute('contenteditable', false)
+        // BuildWebRTC is called when ready
+    } else {
+        // Enter manual mode
+        // connStatusEl.style.display = 'none'
+    }
 
     const buildRTC = async () => {
         peerConnection.addEventListener('icecandidate', event => {
@@ -257,11 +426,17 @@
             if (peerConnection.connectionState === 'connected') {
                 // console.log('We did it! Start up the data channel')
                 connStatusEl.textContent += "Connected to monitor!\n" // fade to black
+                connStatusEl.textContent += "Opening data channel\n"
                 signalWs.close(1000)
+                signalWs = null
+                timerAutoBtn.classList.remove('off')
+                rightTeamAutoBtn.classList.remove('off')
+                leftTeamAutoBtn.classList.remove('off')
             }
         });
 
         signalWs = new WebSocket(wsUrl)
+        connStatusEl.textContent = "Opening WebSocket to signalling server...\n"
         signalWs.addEventListener('open', async () => {
             connStatusEl.textContent += "Connecting to signaling server...\n"
             signalWs.send(JSON.stringify({ 
@@ -270,7 +445,7 @@
             }))
         })
         signalWs.addEventListener('close', (event) => {
-            connStatusEl.textContent = "WS to signaling server closed.\n"
+            connStatusEl.textContent += "WS to signaling server closed.\n"
             switch (event.code) {
                 case 1006:
                     connStatusEl.textContent += "Connection Refused. Please Refresh"
@@ -296,6 +471,7 @@
                 let offer = await peerConnection.createOffer()
                 await peerConnection.setLocalDescription(offer)
                 connStatusEl.textContent += "Sending offer to monitor...\n"
+                console.log("Sending offer")
                 signalWs.send(JSON.stringify({ 
                     timer: randomPass,
                     offer: offer,
@@ -303,6 +479,7 @@
             } else if (msg.answer) { // parse answer
                 peerConnection.setRemoteDescription(new RTCSessionDescription(msg.answer))
                 connStatusEl.textContent += "Recieved answer from monitor-\n"
+                console.log("Recieved answer")
             } else if (msg.iceCandiate) {
                 try {
                     await peerConnection.addIceCandidate(msg.iceCandiate)
@@ -312,11 +489,14 @@
             }
         })
     }
-    buildRTC()
+
+    if (randomPass)
+        buildRTC()
 
 function processMonitorEvent(event) {
     let monitorState = JSON.parse(event.data)
-    console.log(`Got some data from monitor ${monitorState}`)
+    console.log(`Got some data from monitor`)
+    console.log(monitorState)
 
     // There are only 3 possibilities-
     // 1 - Update the timer, freezing or changing the sync
@@ -357,6 +537,28 @@ function processMonitorEvent(event) {
     }
 
     // 3 - State change
+    
+    mainPhaseEl.classList.remove('highlight')
+    phaseInfoEl.classList.remove('highlight')
+    if (monitorState['currPhase'] == undefined || monitorState.currPhase == null) {
+        mainPhaseEl.textContent = "UNKNOWN" // Perhaps monitor should declare this for safety 
+    }
+    else if (monitorState.currPhase != timerState.currPhase) {
+        if (mainPhase.includes(monitorState.currPhase)) {
+            mainPhaseEl.textContent = monitorState.currPhase
+            mainPhaseEl.classList.add('highlight')
+        } else if (Object.keys(subPhase).includes(monitorState.currPhase)) {
+            mainPhaseEl.textContent = subPhase[monitorState.currPhase]
+            phaseInfoEl.textContent = monitorState.currPhase
+            mainPhaseEl.classList.add('highlight')
+            phaseInfoEl.classList.add('highlight')
+
+            phaseInfoEl.classList.toggle('pausePhase',  (monitorState.currPhase == "PAUSE"))
+            phaseInfoEl.classList.toggle('replayPhase',  (monitorState.currPhase == "REPLAY"))
+        }
+    }
+    // TODO: BAN INFO, GAME END will send extra info
+    
     // Still deliberating whether to have one phase name or multiple
 
     connStatusEl.textContent = JSON.stringify(monitorState, null, 1)
@@ -376,11 +578,64 @@ function getTeamLogo(teamName) {
 
 function getTimerText(timer) {
     // Get timer as shown in minutes:seconds from the object
+    if (!timer.seconds) return '--:--'
     let secondsToNow = 0, timerSecs = timer.seconds
     if (timer.ts) // if no timestamp, frozen time
         secondsToNow = (Date.now() - timer.ts)/1000
     timerSecs += (timer.countup) ? secondsToNow : -secondsToNow
     if (timerSecs < 0) timerSecs = 0 // No negative numbers
     return `${Math.trunc(timerSecs / 60).toString().padStart(2,'0')}:${Math.trunc(timerSecs % 60).toString().padStart(2,'0')}`
+}
+
+function parseTimerText(timer_str) {
+    // Parse the text for valid timer
+    let timerLint = ""
+    for (let l=0; l < timer_str.length; l++) {
+        if (timer_str.charCodeAt(l) >= 48 && timer_str.charCodeAt(l) <= 57) // alphanumeric
+            timerLint += timer_str.charAt(l)
+    }
+    
+    // NOTE: In the case that the timer minutes > 100s, this will fail
+    return [timerLint.substring(0,timerLint.length-2), timerLint.substring(timerLint.length-2,timerLint.length)]
+}
+
+function overrideTimer() {
+    // We have to double lint the text here
+    if (!manualTimer) {
+        let timer_str = timerEl.textContent
+        let timer_arr = parseTimerText(timer_str)
+        clearInterval(manualTimerInterval)
+        manualTimerInterval = null
+        manualTimer = {
+            seconds: null,
+            ts: null,
+            countup: true // doubt that people will track wait/ads part
+        }
+        manualTimer.seconds = parseInt(timer_arr[0])*60 + parseInt(timer_arr[1])
+        manualTimer.ts = Date.now()
+        manualTimerInterval = setInterval(() => {
+                        timerEl.textContent = getTimerText(manualTimer)
+                        }, 1000) // runs every second
+        manualTimerBtn.textContent = "Stop Timer ◼"
+        timerEl.setAttribute('contenteditable', false)
+    } else {
+        timerEl.setAttribute('contenteditable', true)
+        clearInterval(manualTimerInterval)
+        manualTimer = null
+        manualTimerBtn.textContent = "Start Timer ▶"
+    }
+    manualTimerBtn.classList.toggle('stoptimer', !!manualTimer)
+    
+}
+
+// UX might be *disable AUTO, then edit.
+// Otherwise accidental clicks will cause resets.
+function focusTimer() {
+    // clear manual intervals
+    clearInterval(manualTimerInterval)
+}
+
+function stopManualTimer() {
+
 }
 </script>

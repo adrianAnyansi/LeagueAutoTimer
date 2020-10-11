@@ -13,7 +13,8 @@ let timerMap = {}
 let wsConnects = 0
 
 const httpServer = http.createServer( (req, res) => {
-    const url = req.url;
+    const parseReq = new URL(req.url, `http://${req.headers.host}`)
+    const url = parseReq.pathname
 
     if (url == "/about") {
         res.write("This is the LeagueAutoTimer signalling server.\n")
@@ -23,18 +24,34 @@ const httpServer = http.createServer( (req, res) => {
         res.write(JSON.stringify(monitorMap) + '\n')
         res.write(JSON.stringify(timerMap) + '\n')
         res.end()
-    } else if (url == "/js") {
-        fs.readFile(__dirname + "/../AutoTimerScript.js").then( file => { 
-            console.log(`Serving js at ${Date.now()}`) 
-            res.setHeader("Content-Type", "application/javascript")
-            res.writeHead(200)
-            res.end(file) // Apparently this loads per request, which is great cause that means free reload
-        }).catch(err => {
-            res.writeHead(500)
-            res.end(err)
-            return
-        })
+    } if (parseReq.hostname == "localhost") {
+        // This is for testing only
+        if (url == "/js") {
+            fs.readFile(__dirname + "/../AutoTimerScript.js").then( file => { 
+                console.log(`Serving js at ${Date.now()}`)
+                res.setHeader("Content-Type", "application/javascript")
+                res.setHeader("Access-Control-Allow-Origin", "*")
+                res.writeHead(200)
+                res.end(file) // Apparently this loads per request, which is great cause that means free reload
+            }).catch(err => {
+                res.writeHead(500)
+                res.end(err)
+                return
+            })
+        } else if (url == "/timer") {
+            fs.readFile(__dirname + "/../AutoTimerUI.html").then( file => { 
+                console.log(`Serving timer at ${Date.now()}`) 
+                res.setHeader("Content-Type", "text/html")
+                res.writeHead(200)
+                res.end(file) // Apparently this loads per request, which is great cause that means free reload
+            }).catch(err => {
+                res.writeHead(500)
+                res.end(err)
+                return
+            })
+        }
     }
+    
 })
 
 const wsServer = new ws.Server({ server:httpServer }) // Use noserver:true & ws.handleUpgradeRequest later on

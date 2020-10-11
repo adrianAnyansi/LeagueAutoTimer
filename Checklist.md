@@ -1,33 +1,42 @@
-# Remaining Stuff for Monitor*
-- Test Game -> Replay -> Game timer
-## Pause Logic
-- Test pause & timer logic
-## Replay Logic
-- Test Game -> Pause -> Replay timer
-### Rewrite debug logic
-- Add flag or remove logic from the script
-### Add promise to syncTimer
+# TODO List for Monitor*
+- Prettify the buttons?
+- Connection Status for timer
+- Add url param call for timer
+
+# TODO List for Timer
+- Disable debug object/para
+- Lock Team/Timer controls on AUTO start
+- Get closest team name when sent info
 
 ## Add streamer layout 
-- Remove debug tools
-- Add streamer layout
+- DONE Remove debug tools
+- DONE Add streamer layout
 
 # WebRTC
-- Put WebRTC in monitor side
-- Put event system in the monitor
+- DONE Put WebRTC in monitor side
+- DONE Put event system in the monitor
 - Restrict with url param + local IP restriction
 
 # Client/Timer side
-- Begin UI stuff
-- Add lint/diff per event to pull changes
+- DONE Begin UI stuff
+- DONE Add lint/diff per event to pull changes
     - Track team name
     - timer ts or seconds change
     - phase change*
-- Add a "waiting for state" animation*
+- Add a "waiting for state" animation*? P2P is so fast locally I can't tell??
 
 ## Manual
 - Add Auto Toggle for each
-- Auto all
 ## Manual Override
-    - Change teams
-    - Start timer @ point
+    - DONE Change teams
+    - DONE Start timer @ point
+
+# Future features
+- Track ban phase
+    - Track ban /pick
+        Not reading the champions/player names or etc
+- Track Gane End
+    - Display winner & etc for 15s with UNKNOWN check
+
+
+
