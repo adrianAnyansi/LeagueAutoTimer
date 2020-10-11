@@ -18,7 +18,8 @@ Firefox:    `Ctrl+Shift+K` 	or 	`Tools -> Web Developer -> Web Console.`
 
 4) Copy & Paste the following code and click ENTER
 	```javascript
-	let leagueAutoTimerPromise = fetch('https://raw.githubusercontent.com/adrianAnyansi/LeagueAutoTimer/main/AutoTimerScript.js').then(resp => resp.text())
+	let leagueAutoTimerPromise = fetch('https://raw.githubusercontent.com/adrianAnyansi/LeagueAutoTimer/main/AutoTimerScript.js')
+	.then(resp => resp.text())
 	.then(val => {console.log('League Auto Timer has downloaded'); return val;} )
 
 	eval((await leagueAutoTimerPromise))
