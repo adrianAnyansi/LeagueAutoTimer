@@ -43,13 +43,16 @@ const canvas = document.createElement('canvas')
 canvas.height = 1080    // videoFrame.videoHeight // Hardcoding for max res
 canvas.width = 1920     //videoFrame.videoWidth
 const canvasctx = canvas.getContext('2d', {alpha: false})
-const anchorEl = window.location.origin.includes('youtube') ? document.querySelector('#player-theater-container') 
-                : document.querySelector('.channel-info-content')
+// const anchorEl = window.location.origin.includes('youtube') ? document.querySelector('#player-theater-container') 
+//                 : document.querySelector('.channel-root__player')
+const anchorEl = window.location.origin.includes('youtube') ? document.querySelector('#info-contents.style-scope.ytd-watch-flexy')
+                : document.querySelector('.channel-info-content .tw-border-t')
+
 if (debug) {
     canvasctx.fillStyle = "red"
     canvasctx.strokeStyle = "red"
     canvas.style.width = "100%"
-    anchorEl.after(canvas) // debug youtube
+    anchorEl.before(canvas) // debug youtube
     // NOTE: The 'Cinema' mode in YT is a different node tree, Im not gonna try and track that
 }
 
@@ -341,15 +344,16 @@ function verifyStreamPhase(checkObj) { // pass fail this time, add values for de
 
 let upperDiv = document.createElement('div')
 let stateDiv = document.createElement('span')
-anchorEl.after(upperDiv)
+anchorEl.before(upperDiv)
 stateDiv.textContent = "League Auto Timer intialized-"
-const divStyle = `color: snow; font-size: 20px; padding-left: 20px`
+const divStyle = `color: black; font-size: 20px; padding: 0 1em`
 stateDiv.style.cssText = divStyle
+upperDiv.style.cssText = `border: 2px black solid;   display: inline-block;   padding: 0.3em 1em; background-color: #eae6ea`
 
 let timerDiv = document.createElement('span')
 timerDiv.textContent = '00:00'
 timerDiv.style.cssText = divStyle
-timerDiv.style.color = "lightblue"
+timerDiv.style.color = "#0a2dda"
 let timerInterval = setInterval ( ()=> { // attempt to trigger getTimerText on the sync
     timerDiv.textContent = getTimerText()
     if (streamState.timer.seconds) {
@@ -379,9 +383,9 @@ openTimerBtn.addEventListener('click', event => {
     window.open(timerUrl + `?rgpfp=${randomPass}`, '_blank')
 })
 clearStateBtn.style.cssText = `margin: 0.5em; font-size: 1.6em; padding: 0.2em 0.5em;` +
-                                `cursor: pointer; font-weight: bold;`
+                                `cursor: pointer; font-weight: bold; background-color: #eae6ea`
 openTimerBtn.style.cssText = `margin: 0.5em; font-size: 1.6em; padding: 0.2em 0.5em;` +
-                                `cursor: pointer; font-weight: bold;`
+                                `cursor: pointer; font-weight: bold; background-color: #eae6ea`
 
 let connStateImg = document.createElement('span')
 connStateImg.style.cssText = `background-color: red; width: 1em; height: 1em; display: inline-block`
@@ -817,60 +821,70 @@ var SM = () => {
 }
 
 if (!debug) {
-    SM() // start interval
+    ocradPromise.then( () => {
+        SM() // start interval
+        console.log("League Auto Timer is starting up")
+    })
 }
 
 var gimme = () => {
-    return [streamState, stateDiv, phase]
+    return [streamState, stateDiv, phase, peerConnection, peerDataChannel]
 }
 
 // Begin WebRTC implementation testing
 
 const webRTCConfig = {'iceServers': []} // No STUN Servers means only local router conn
-const peerConnection = new RTCPeerConnection(webRTCConfig)
+let peerConnection = null
 let signalWs = null
 let peerDataChannel = null
 const CLEAN_EVENT = 'STREAM_STATE_CLEAN'
 let randomPass = null
 let cacheICECandidate = []
 
-peerConnection.addEventListener('icecandidate', event => {
-    if (event.candidate) {
-        if (signalWs && signalWs.readyState != WebSocket.OPEN) {
-            cacheICECandidate.push(event.candidate)
-            console.log("Cache cand.")
-        } else {
-            signalWs.send(JSON.stringify({
-                monitor: randomPass,
-                'iceCandiate': event.candidate
-            }))
+function resetPeerConnection () {
+    peerConnection.addEventListener('icecandidate', event => {
+        if (event.candidate) {
+            if (signalWs && signalWs.readyState != WebSocket.OPEN) {
+                cacheICECandidate.push(event.candidate)
+                console.log("Cache cand.")
+            } else {
+                signalWs.send(JSON.stringify({
+                    monitor: randomPass,
+                    'iceCandiate': event.candidate
+                }))
+            }
+            console.log(`Resolving ${event.candidate}`)
         }
-        console.log(`Resolving ${event.candidate}`)
-    }
-})
-peerConnection.addEventListener('connectionstatechange', event => {
-    if (peerConnection.connectionState === 'connected') {
-        console.log('We did it! Start up the data channel?')
-        connStateImg.style.backgroundColor = "blue"
-    }
-});
-peerConnection.addEventListener('datachannel', event => {
-    peerDataChannel = event.channel;
-    if (signalWs) {
-        signalWs.close(1000) // close signalling server
-        signalWs = null
-    }
-    connStateImg.style.backgroundColor = "forestgreen"
-    sendStateOverWebRTC(streamState.frameBuf[0].phase)
-    peerDataChannel.addEventListener('message', (event) => {
-        let msg = JSON.stringify(event.data) // assume json only
-        console.log(`Recieved data message from timer ${msg}`)
-        
-        // Only event we'll get is a state reset*
-        if (msg.command == CLEAN_EVENT)
-            streamState.clean()
     })
-});
+    peerConnection.addEventListener('connectionstatechange', event => {
+        if (peerConnection.connectionState === 'connected') {
+            console.log('We did it! Start up the data channel?')
+            connStateImg.style.backgroundColor = "blue"
+        }
+    });
+    peerConnection.ondatachannel =  event => {
+        peerDataChannel = event.channel;
+        if (signalWs) {
+            signalWs.close(1000) // close signalling server
+            signalWs = null
+        }
+        connStateImg.style.backgroundColor = "forestgreen"
+        sendStateOverWebRTC(streamState.frameBuf[0].phase)
+        peerDataChannel.addEventListener('message', (event) => {
+            let msg = JSON.stringify(event.data) // assume json only
+            console.log(`Recieved data message from timer ${msg}`)
+            
+            // Only event we'll get is a state reset*
+            if (msg.command == CLEAN_EVENT)
+                streamState.clean()
+        })
+        peerDataChannel.addEventListener('close', event => {
+            console.log('P2P datachannel was closed.')
+            connStateImg.style.backgroundColor = "red"
+            peerDataChannel = null
+        })
+    };
+}
 
 function connectToSignalingServer () {
     // Create new WS and start handshake with timer window
@@ -880,6 +894,8 @@ function connectToSignalingServer () {
         // Seems Chrome and Firefox have different standards for what triggers ICE candidates
         // Chrome will only do it when you create a data channel before the offer
         // Firefox will do it early. Needs more testing
+        peerConnection = new RTCPeerConnection(webRTCConfig)
+        resetPeerConnection()
         connStateImg.style.backgroundColor = "orange"
         signalWs.send(JSON.stringify({ 
             monitor: randomPass,

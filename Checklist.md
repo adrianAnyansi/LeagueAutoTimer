@@ -1,11 +1,11 @@
 # TODO List for Monitor*
 - Prettify the buttons?
-- Connection Status for timer
-- Add url param call for timer
+- DONE Connection Status for timer
+- DONE Add url param call for timer
 
 # TODO List for Timer
-- Disable debug object/para
-- Lock Team/Timer controls on AUTO start
+- DONE Disable debug object/para
+- DONE Lock Team/Timer controls on AUTO start
 - Get closest team name when sent info
 
 ## Add streamer layout 
@@ -33,8 +33,8 @@
 
 # Future features
 - Track ban phase
-    - Track ban /pick
-        Not reading the champions/player names or etc
+    - Track ban
+    - Track pick
 - Track Gane End
     - Display winner & etc for 15s with UNKNOWN check
 

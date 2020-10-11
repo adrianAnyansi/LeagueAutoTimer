@@ -14,9 +14,11 @@
                 font-family: 'Colfax',Helvetica,sans-serif;
             }
             #connectionStatus {
-                margin-top: 7em;
                 white-space: pre;
                 line-height: 1.4;
+            }
+            .bigspace {
+                margin-top: 7em;
             }
             #teamNameDiv {
                 display: flex;
@@ -204,6 +206,11 @@
                 padding: 0.5em 0.5em;
                 z-index: 100;
             }
+            .connStatusSpan {
+                width: 1em;
+                height: 1em;
+                background-color: red;
+            }
         </style>
     </head>
     <body spellcheck="false">
@@ -229,6 +236,7 @@
         <div>
             <span contenteditable="true" class="bigTimer">01:20</span> 
         </div>
+        <div class="bigspace"></div>
 
         <div class="manager">
             <p id="connectionStatus" class="status"></p>
@@ -240,6 +248,7 @@
             </div>
             <div class="autoManager">
                 <p class="title">Auto Controls
+                    <span class="connStatusSpan"></span>
                     <!-- <span class="help" help-text="Disable these to manually change teams/timer.">?</span> -->
                     <span class="help note" help-text="Changing AUTO settings is being worked on.">!</span>
                 <!-- <p>Partial AUTO will be added later. To enable AUTO, use the monitor to open the timer page.</p> -->
@@ -254,9 +263,6 @@
 </html>
 <script>
     let debug = true
-
-    if (!debug)
-        connStatusEl.style.display = 'none'
 
     // lazy load all images?
     // https://am-a.akamaihd.net/image/?resize=70:&f=http%3A%2F%2Fstatic.lolesports.com%2Fteams%2F1592590875575_TeamLiquidTL-01-FullonDark.png
@@ -282,6 +288,8 @@
         UOL: 'https://am-a.akamaihd.net/image/?resize=70:&f=https%3A%2F%2Flolstatic-a.akamaihd.net%2Fesports-assets%2Fproduction%2Fteam%2Funicorns-of-love-8qvakeja.png'
     }
     
+
+    let connStatusSpan = document.querySelector('.connStatusSpan')
     
     let timerState = {
         currPhase: null,
@@ -319,6 +327,10 @@
     const timerAutoBtn = document.querySelector('#timerAutoBtn')
     const manualTimerBtn = document.querySelector('#manualTimerBtn')
     manualTimerBtn.addEventListener('click', overrideTimer)
+
+    
+    if (!debug)
+        connStatusEl.style.display = 'none'
 
     const teamDropdown = document.querySelector('.dropdown')
     let teamList = []
@@ -425,20 +437,31 @@
         peerConnection.addEventListener('connectionstatechange', event => {
             if (peerConnection.connectionState === 'connected') {
                 // console.log('We did it! Start up the data channel')
+                connStatusSpan.style.backgroundColor = 'blue'
                 connStatusEl.textContent += "Connected to monitor!\n" // fade to black
                 connStatusEl.textContent += "Opening data channel\n"
-                signalWs.close(1000)
-                signalWs = null
                 timerAutoBtn.classList.remove('off')
                 rightTeamAutoBtn.classList.remove('off')
                 leftTeamAutoBtn.classList.remove('off')
+                signalWs.close(1000)
+                signalWs = null
             }
         });
+        peerConnection.addEventListener('negotiationneeded', async () => {
+            await peerConnection.setLocalDescription()
+            connStatusEl.textContent += "Sending offer to monitor...\n"
+            console.log("Sending offer")
+            signalWs.send(JSON.stringify({ 
+                timer: randomPass,
+                offer: peerConnection.localDescription,
+            }))
+        })
 
         signalWs = new WebSocket(wsUrl)
         connStatusEl.textContent = "Opening WebSocket to signalling server...\n"
         signalWs.addEventListener('open', async () => {
             connStatusEl.textContent += "Connecting to signaling server...\n"
+            connStatusSpan.style.backgroundColor = 'orange'
             signalWs.send(JSON.stringify({ 
                 timer: randomPass,
                 register: true,
@@ -465,17 +488,25 @@
             let msg = JSON.parse(event.data)
             if (msg.paired) { // connected to signal server, and conn to monitor available
                 connStatusEl.textContent += "Paired with monitor...\n"
+                connStatusSpan.style.backgroundColor = 'yellow'
                 // You must create the datachannel before the OFFER!
                 peerDataChannel = peerConnection.createDataChannel('LeagueAutoTimer:Monitor')
                 peerDataChannel.addEventListener('message', processMonitorEvent)
-                let offer = await peerConnection.createOffer()
-                await peerConnection.setLocalDescription(offer)
-                connStatusEl.textContent += "Sending offer to monitor...\n"
-                console.log("Sending offer")
-                signalWs.send(JSON.stringify({ 
-                    timer: randomPass,
-                    offer: offer,
-                }))
+                peerDataChannel.addEventListener('open', event => {
+                    connStatusSpan.style.backgroundColor = 'forestgreen'
+                })
+                // let offer = await peerConnection.createOffer()
+                if (peerConnection.signalingState != "stable") {
+                    console.log("unstable PC")
+                    return;
+                }
+                // await peerConnection.setLocalDescription(offer)
+                // connStatusEl.textContent += "Sending offer to monitor...\n"
+                // console.log("Sending offer")
+                // signalWs.send(JSON.stringify({ 
+                //     timer: randomPass,
+                //     offer: offer,
+                // }))
             } else if (msg.answer) { // parse answer
                 peerConnection.setRemoteDescription(new RTCSessionDescription(msg.answer))
                 connStatusEl.textContent += "Recieved answer from monitor-\n"
