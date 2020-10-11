@@ -1,6 +1,6 @@
 const signalAddr = 'wstest.leagueautotimer.dev'
 const timerUrl = `https://league-auto-timer.s3.amazonaws.com/AutoTimerUI.html:8080`
-const wsUrl = `ws://${signalAddr}:8080`
+const wsUrl = `wss://${signalAddr}:8080`
 var geval = eval //global eval, use with caution
 debug = false
 
